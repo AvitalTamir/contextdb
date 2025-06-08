@@ -1,0 +1,96 @@
+# Zig build artifacts
+.zig-cache/
+zig-out/
+zig-cache/
+
+# ContextDB data directories
+contextdb_data/
+my_contextdb/
+test_*_data/
+demo_*/
+node*_data/
+*_contextdb/
+
+# ContextDB files
+*.log
+*.bin
+raftstate.bin
+raft_state.bin
+*.snapshot
+snapshots/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vim/
+.netrwhist
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+
+# AWS credentials (if accidentally placed in project)
+.aws/
+aws-credentials
+
+# S3 sync artifacts
+*.s3sync
+
+# Performance profiling
+*.prof
+*.flamegraph
+
+# Coverage reports
+coverage/
+*.gcov
+
+# Backup files
+*.bak
+*.backup
+
+# Node.js (if any tooling uses it)
+node_modules/
+npm-debug.log*
+
+# Python (if any tooling uses it)
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+
+# Rust (if any tooling uses it)
+target/
+
+# Go (if any tooling uses it)
+*.exe
+*.exe~
+
+# Test artifacts
+test_results/
+benchmark_results/
+
+# Documentation build artifacts
+docs/build/
+*.pdf
+*.epub
+
+# Local configuration overrides
+config.local.*
+.env.local 
