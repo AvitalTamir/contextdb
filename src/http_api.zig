@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const ContextDB = @import("main.zig").ContextDB;
 const DistributedContextDB = @import("distributed_contextdb.zig").DistributedContextDB;
+const config = @import("config.zig");
 
 /// HTTP Status codes
 pub const HttpStatus = enum(u16) {
@@ -126,6 +127,31 @@ pub const QueryHybridRequest = struct {
     top_k: u32 = 10,
 };
 
+/// HTTP Server configuration derived from centralized config
+pub const HttpConfig = struct {
+    port: u16,
+    request_buffer_size: u32,
+    response_buffer_size: u32,
+    bind_address: []const u8,
+    memory_warning_bytes: u64,
+    memory_critical_bytes: u64,
+    error_rate_warning: f32,
+    error_rate_critical: f32,
+    
+    pub fn fromConfig(global_cfg: config.Config, port_override: ?u16) HttpConfig {
+        return HttpConfig{
+            .port = port_override orelse global_cfg.http_port,
+            .request_buffer_size = global_cfg.http_request_buffer_size,
+            .response_buffer_size = global_cfg.http_response_buffer_size,
+            .bind_address = global_cfg.http_bind_address,
+            .memory_warning_bytes = @intFromFloat(global_cfg.health_memory_warning_gb * 1_000_000_000.0),
+            .memory_critical_bytes = @intFromFloat(global_cfg.health_memory_critical_gb * 1_000_000_000.0),
+            .error_rate_warning = global_cfg.health_error_rate_warning,
+            .error_rate_critical = global_cfg.health_error_rate_critical,
+        };
+    }
+};
+
 /// API Server
 pub const ApiServer = struct {
     allocator: std.mem.Allocator,
@@ -133,14 +159,19 @@ pub const ApiServer = struct {
     distributed_db: ?*DistributedContextDB,
     port: u16,
     server: ?std.net.Server,
+    http_config: HttpConfig,
 
-    pub fn init(allocator: std.mem.Allocator, db: *ContextDB, distributed_db: ?*DistributedContextDB, port: u16) ApiServer {
+    pub fn init(allocator: std.mem.Allocator, db: *ContextDB, distributed_db: ?*DistributedContextDB, port: ?u16, global_config: ?config.Config) ApiServer {
+        const global_cfg = global_config orelse config.Config{};
+        const http_cfg = HttpConfig.fromConfig(global_cfg, port);
+        
         return ApiServer{
             .allocator = allocator,
             .db = db,
             .distributed_db = distributed_db,
-            .port = port,
+            .port = http_cfg.port,
             .server = null,
+            .http_config = http_cfg,
         };
     }
 
@@ -192,7 +223,13 @@ pub const ApiServer = struct {
         self.db.metrics.incrementActiveConnections();
         defer self.db.metrics.decrementActiveConnections();
         
-        var buffer: [4096]u8 = undefined;
+        // Use configurable buffer size
+        const buffer = self.allocator.alloc(u8, self.http_config.request_buffer_size) catch {
+            std.debug.print("Failed to allocate request buffer\n", .{});
+            return;
+        };
+        defer self.allocator.free(buffer);
+        
         var request_start: usize = 0;
         
         while (true) {
@@ -357,8 +394,9 @@ pub const ApiServer = struct {
     }
 
     fn handleHealth(self: *ApiServer) !HttpResponse {
-        var response_buf: [2048]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&response_buf);
+        const response_buf = try self.allocator.alloc(u8, self.http_config.response_buffer_size);
+        defer self.allocator.free(response_buf);
+        var fba = std.heap.FixedBufferAllocator.init(response_buf);
         const temp_allocator = fba.allocator();
 
         // Perform comprehensive health checks
@@ -382,9 +420,9 @@ pub const ApiServer = struct {
         const memory_usage = self.db.metrics.memory_usage_bytes.get();
         const memory_check_time = @divTrunc(std.time.nanoTimestamp() - memory_check_start, 1000);
         
-        const memory_status = if (memory_usage < 1_000_000_000) // < 1GB
+        const memory_status = if (memory_usage < self.http_config.memory_warning_bytes)
             self.db.monitoring.HealthStatus.healthy
-        else if (memory_usage < 2_000_000_000) // < 2GB
+        else if (memory_usage < self.http_config.memory_critical_bytes)
             self.db.monitoring.HealthStatus.degraded
         else
             self.db.monitoring.HealthStatus.unhealthy;
@@ -397,9 +435,9 @@ pub const ApiServer = struct {
         const error_rate = self.db.metrics.getErrorRate();
         const error_check_time = @divTrunc(std.time.nanoTimestamp() - error_check_start, 1000);
         
-        const error_status = if (error_rate < 1.0) // < 1%
+        const error_status = if (error_rate < self.http_config.error_rate_warning)
             self.db.monitoring.HealthStatus.healthy
-        else if (error_rate < 5.0) // < 5%
+        else if (error_rate < self.http_config.error_rate_critical)
             self.db.monitoring.HealthStatus.degraded
         else
             self.db.monitoring.HealthStatus.unhealthy;

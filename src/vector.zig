@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const config = @import("config.zig");
 
 /// In-memory vector index for similarity search
 /// Uses linear search for simplicity, can be upgraded to HNSW/IVF later
@@ -73,10 +74,13 @@ pub const VectorIndex = struct {
 /// Vector similarity search engine
 pub const VectorSearch = struct {
     allocator: std.mem.Allocator,
+    config: VectorConfig,
 
-    pub fn init(allocator: std.mem.Allocator) VectorSearch {
+    pub fn init(allocator: std.mem.Allocator, vector_config: ?VectorConfig) VectorSearch {
+        const cfg = vector_config orelse VectorConfig.fromConfig(config.Config{});
         return VectorSearch{
             .allocator = allocator,
+            .config = cfg,
         };
     }
 
@@ -113,9 +117,10 @@ pub const VectorSearch = struct {
         return similarities;
     }
 
-    /// Find vectors within a similarity threshold
-    pub fn querySimilarityThreshold(self: *const VectorSearch, index: *const VectorIndex, query_vector_id: u64, threshold: f32) !std.ArrayList(types.SimilarityResult) {
+    /// Find vectors within a similarity threshold (uses config default or provided threshold)
+    pub fn querySimilarityThreshold(self: *const VectorSearch, index: *const VectorIndex, query_vector_id: u64, threshold: ?f32) !std.ArrayList(types.SimilarityResult) {
         const query_vector = index.getVector(query_vector_id) orelse return error.VectorNotFound;
+        const actual_threshold = threshold orelse self.config.similarity_threshold;
         
         var results = std.ArrayList(types.SimilarityResult).init(self.allocator);
         
@@ -123,7 +128,7 @@ pub const VectorSearch = struct {
             if (candidate_vector.id == query_vector_id) continue; // Skip self
             
             const similarity = query_vector.cosineSimilarity(&candidate_vector);
-            if (similarity >= threshold) {
+            if (similarity >= actual_threshold) {
                 try results.append(types.SimilarityResult{
                     .id = candidate_vector.id,
                     .similarity = similarity,
@@ -262,34 +267,38 @@ fn compareByDescendingSimilarity(context: void, a: types.SimilarityResult, b: ty
     return a.similarity > b.similarity;
 }
 
-/// Vector clustering using k-means (simplified version)
+/// K-means clustering for vectors
 pub const VectorClustering = struct {
     allocator: std.mem.Allocator,
+    config: VectorConfig,
     
-    pub fn init(allocator: std.mem.Allocator) VectorClustering {
+    pub fn init(allocator: std.mem.Allocator, vector_config: ?VectorConfig) VectorClustering {
+        const cfg = vector_config orelse VectorConfig.fromConfig(config.Config{});
         return VectorClustering{
             .allocator = allocator,
+            .config = cfg,
         };
     }
     
-    /// Simple k-means clustering of vectors
-    pub fn kMeansClustering(self: *const VectorClustering, vectors: []const types.Vector, k: u32, max_iterations: u32) !std.ArrayList(Cluster) {
+    /// Perform k-means clustering on a set of vectors (uses config default or provided max_iterations)
+    pub fn kMeansClustering(self: *const VectorClustering, vectors: []const types.Vector, k: u32, max_iterations: ?u32) !std.ArrayList(Cluster) {
         if (vectors.len == 0 or k == 0) return std.ArrayList(Cluster).init(self.allocator);
         
+        const actual_max_iterations = max_iterations orelse self.config.max_iterations;
         var clusters = std.ArrayList(Cluster).init(self.allocator);
         
-        // Initialize k clusters with random centroids (deterministic for testing)
+        // Initialize k clusters with random centroids
         for (0..k) |i| {
-            var cluster = Cluster{
-                .centroid = vectors[i % vectors.len], // Simple deterministic initialization
+            const centroid = if (i < vectors.len) vectors[i] else vectors[0];
+            const cluster = Cluster{
+                .centroid = centroid,
                 .members = std.ArrayList(u64).init(self.allocator),
             };
-            cluster.centroid.id = @intCast(i); // Give cluster ID
             try clusters.append(cluster);
         }
         
         var iteration: u32 = 0;
-        while (iteration < max_iterations) : (iteration += 1) {
+        while (iteration < actual_max_iterations) : (iteration += 1) {
             // Clear previous assignments
             for (clusters.items) |*cluster| {
                 cluster.members.clearRetainingCapacity();
@@ -370,6 +379,8 @@ pub const HNSWConfig = struct {
     ml: f32 = 1.0 / @log(2.0),
     /// Seed for deterministic behavior
     seed: u64 = 42,
+    /// Maximum number of layers in HNSW
+    max_layers: u8 = 16,
 };
 
 /// HNSW Node representing a vector in the graph
@@ -445,7 +456,7 @@ pub const HNSWIndex = struct {
     // Random number generator for deterministic behavior
     prng: std.Random.DefaultPrng,
     
-    pub fn init(allocator: std.mem.Allocator, config: HNSWConfig) !HNSWIndex {
+    pub fn init(allocator: std.mem.Allocator, hnsw_config: HNSWConfig) !HNSWIndex {
         var layers = std.ArrayList(std.AutoHashMap(u64, HNSWNode)).init(allocator);
         
         // Initialize at least one layer (layer 0)
@@ -453,11 +464,11 @@ pub const HNSWIndex = struct {
         
         return HNSWIndex{
             .allocator = allocator,
-            .config = config,
+            .config = hnsw_config,
             .vectors = std.AutoHashMap(u64, types.Vector).init(allocator),
             .layers = layers,
             .entry_point = null,
-            .prng = std.Random.DefaultPrng.init(config.seed),
+            .prng = std.Random.DefaultPrng.init(hnsw_config.seed),
         };
     }
     
@@ -479,7 +490,7 @@ pub const HNSWIndex = struct {
         const random = self.prng.random();
         var level: u8 = 0;
         
-        while (random.float(f32) < self.config.ml and level < 16) { // Cap at 16 layers
+        while (random.float(f32) < self.config.ml and level < self.config.max_layers) {
             level += 1;
         }
         
@@ -764,6 +775,54 @@ pub const HNSWIndex = struct {
     }
 };
 
+/// Vector configuration derived from centralized config
+pub const VectorConfig = struct {
+    dimensions: u32,
+    similarity_threshold: f32,
+    max_iterations: u32,
+    
+    pub fn fromConfig(global_cfg: config.Config) VectorConfig {
+        return VectorConfig{
+            .dimensions = global_cfg.vector_dimensions,
+            .similarity_threshold = global_cfg.vector_similarity_threshold,
+            .max_iterations = global_cfg.clustering_max_iterations,
+        };
+    }
+};
+
+/// HNSW configuration derived from centralized config
+pub const HNSWConfigFromGlobal = struct {
+    max_connections: u16,
+    max_connections_layer0: u32,
+    ef_construction: u32,
+    ml: f32,
+    seed: u64,
+    max_layers: u8,
+    
+    pub fn fromConfig(global_cfg: config.Config) HNSWConfigFromGlobal {
+        return HNSWConfigFromGlobal{
+            .max_connections = global_cfg.hnsw_max_connections,
+            .max_connections_layer0 = global_cfg.hnsw_max_connections_layer0,
+            .ef_construction = global_cfg.hnsw_ef_construction,
+            .ml = global_cfg.hnsw_ml_factor,
+            .seed = global_cfg.hnsw_random_seed,
+            .max_layers = global_cfg.hnsw_max_layers,
+        };
+    }
+    
+    /// Convert to the original HNSWConfig format
+    pub fn toHNSWConfig(self: HNSWConfigFromGlobal) HNSWConfig {
+        return HNSWConfig{
+            .max_connections = self.max_connections,
+            .max_connections_layer0 = self.max_connections_layer0,
+            .ef_construction = self.ef_construction,
+            .ml = self.ml,
+            .seed = self.seed,
+            .max_layers = self.max_layers,
+        };
+    }
+};
+
 test "VectorIndex basic operations" {
     const allocator = std.testing.allocator;
     
@@ -806,7 +865,7 @@ test "VectorSearch similarity queries" {
     try index.addVector(types.Vector.init(2, &dims2));
     try index.addVector(types.Vector.init(3, &dims3));
 
-    const search = VectorSearch.init(allocator);
+    const search = VectorSearch.init(allocator, null);
     
     // Test similarity search
     const similar = try search.querySimilar(&index, 1, 2);
@@ -817,6 +876,35 @@ test "VectorSearch similarity queries" {
     try std.testing.expect(similar.items[0].id == 2); // Vector 2 should be most similar to 1
 }
 
+test "Vector configuration integration" {
+    const allocator = std.testing.allocator;
+    
+    // Create custom vector configuration
+    const vector_cfg = VectorConfig{
+        .dimensions = 256,
+        .similarity_threshold = 0.9,
+        .max_iterations = 50,
+    };
+    
+    // Test VectorSearch with custom config
+    const search = VectorSearch.init(allocator, vector_cfg);
+    try std.testing.expect(search.config.dimensions == 256);
+    try std.testing.expect(search.config.similarity_threshold == 0.9);
+    try std.testing.expect(search.config.max_iterations == 50);
+    
+    // Test VectorClustering with custom config
+    const clustering = VectorClustering.init(allocator, vector_cfg);
+    try std.testing.expect(clustering.config.dimensions == 256);
+    try std.testing.expect(clustering.config.similarity_threshold == 0.9);
+    try std.testing.expect(clustering.config.max_iterations == 50);
+    
+    // Test default config fallback
+    const search_default = VectorSearch.init(allocator, null);
+    try std.testing.expect(search_default.config.dimensions == 128);
+    try std.testing.expect(search_default.config.similarity_threshold == 0.5);
+    try std.testing.expect(search_default.config.max_iterations == 100);
+}
+
 test "VectorSearch threshold queries" {
     const allocator = std.testing.allocator;
     
@@ -825,28 +913,28 @@ test "VectorSearch threshold queries" {
 
     // Create test vectors
     const dims1 = [_]f32{ 1.0, 0.0, 0.0 } ++ [_]f32{0.0} ** 125;
-    const dims2 = [_]f32{ 0.8, 0.6, 0.0 } ++ [_]f32{0.0} ** 125; // High similarity
-    const dims3 = [_]f32{ 0.1, 0.0, 0.0 } ++ [_]f32{0.0} ** 125; // Low similarity
+    const dims2 = [_]f32{ 0.8, 0.6, 0.0 } ++ [_]f32{0.0} ** 125; // High similarity (~0.8)
+    const dims3 = [_]f32{ 0.1, 0.0, 0.0 } ++ [_]f32{0.0} ** 125; // Very high similarity (1.0)
     
     try index.addVector(types.Vector.init(1, &dims1));
     try index.addVector(types.Vector.init(2, &dims2));
     try index.addVector(types.Vector.init(3, &dims3));
 
-    const search = VectorSearch.init(allocator);
+    const search = VectorSearch.init(allocator, null);
     
-    // Test threshold search
-    const threshold_results = try search.querySimilarityThreshold(&index, 1, 0.5);
+    // Test threshold search with high threshold that only vector 3 should pass
+    const threshold_results = try search.querySimilarityThreshold(&index, 1, 0.9);
     defer threshold_results.deinit();
     
-    // Should only include vector 2 (high similarity)
+    // Should only include vector 3 (very high similarity)
     try std.testing.expect(threshold_results.items.len == 1);
-    try std.testing.expect(threshold_results.items[0].id == 2);
+    try std.testing.expect(threshold_results.items[0].id == 3);
 }
 
 test "VectorClustering k-means" {
     const allocator = std.testing.allocator;
     
-    const clustering = VectorClustering.init(allocator);
+    const clustering = VectorClustering.init(allocator, null);
     
     // Create test vectors in two groups
     var vectors = [_]types.Vector{
@@ -856,7 +944,7 @@ test "VectorClustering k-means" {
         types.Vector.init(4, &([_]f32{ 0.0, 0.1, 0.9 } ++ [_]f32{0.0} ** 125)),
     };
     
-    var clusters = try clustering.kMeansClustering(&vectors, 2, 10);
+    var clusters = try clustering.kMeansClustering(&vectors, 2, null);
     defer {
         for (clusters.items) |*cluster| {
             cluster.deinit();
@@ -872,4 +960,55 @@ test "VectorClustering k-means" {
         total_members += @intCast(cluster.members.items.len);
     }
     try std.testing.expect(total_members == 4);
+}
+
+test "Vector configuration integration with global config" {
+    const allocator = std.testing.allocator;
+    
+    // Create a global configuration with custom vector settings
+    const global_cfg = config.Config{
+        .vector_dimensions = 256,
+        .vector_similarity_threshold = 0.8,
+        .clustering_max_iterations = 150,
+        .hnsw_max_connections = 24,
+        .hnsw_max_connections_layer0 = 48,
+        .hnsw_ef_construction = 300,
+        .hnsw_ml_factor = 0.5,
+        .hnsw_random_seed = 123456,
+        .hnsw_max_layers = 20,
+    };
+    
+    // Test VectorConfig.fromConfig
+    const vector_cfg = VectorConfig.fromConfig(global_cfg);
+    try std.testing.expect(vector_cfg.dimensions == 256);
+    try std.testing.expect(vector_cfg.similarity_threshold == 0.8);
+    try std.testing.expect(vector_cfg.max_iterations == 150);
+    
+    // Test HNSWConfigFromGlobal.fromConfig
+    const hnsw_cfg_global = HNSWConfigFromGlobal.fromConfig(global_cfg);
+    try std.testing.expect(hnsw_cfg_global.max_connections == 24);
+    try std.testing.expect(hnsw_cfg_global.max_connections_layer0 == 48);
+    try std.testing.expect(hnsw_cfg_global.ef_construction == 300);
+    try std.testing.expect(hnsw_cfg_global.ml == 0.5);
+    try std.testing.expect(hnsw_cfg_global.seed == 123456);
+    try std.testing.expect(hnsw_cfg_global.max_layers == 20);
+    
+    // Test conversion to HNSWConfig
+    const hnsw_cfg = hnsw_cfg_global.toHNSWConfig();
+    try std.testing.expect(hnsw_cfg.max_connections == 24);
+    try std.testing.expect(hnsw_cfg.max_connections_layer0 == 48);
+    try std.testing.expect(hnsw_cfg.ef_construction == 300);
+    try std.testing.expect(hnsw_cfg.ml == 0.5);
+    try std.testing.expect(hnsw_cfg.seed == 123456);
+    try std.testing.expect(hnsw_cfg.max_layers == 20);
+    
+    // Test VectorSearch with global config
+    const search = VectorSearch.init(allocator, vector_cfg);
+    try std.testing.expect(search.config.similarity_threshold == 0.8);
+    
+    // Test VectorClustering with global config
+    const clustering = VectorClustering.init(allocator, vector_cfg);
+    try std.testing.expect(clustering.config.max_iterations == 150);
+    
+    std.debug.print("✓ Vector configuration integration test passed\n", .{});
 } 

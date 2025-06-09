@@ -16,10 +16,10 @@ test "CacheStats basic operations" {
     try testing.expect(stats.getHitRatio() == 0.0);
     try testing.expect(stats.getUtilization() == 0.0);
     
-    // Record some hits and misses
-    stats.recordHit(1000);
-    stats.recordMiss(2000);
-    stats.recordHit(1500);
+    // Record some hits and misses with alpha parameter
+    stats.recordHit(1000, 0.1);
+    stats.recordMiss(2000, 0.1);
+    stats.recordHit(1500, 0.1);
     
     try testing.expect(stats.hits == 2);
     try testing.expect(stats.misses == 1);
@@ -92,6 +92,7 @@ test "Cache basic put and get operations" {
         .max_size = 1000,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -130,6 +131,7 @@ test "Cache LRU eviction policy" {
         .max_size = 100, // Small cache to trigger eviction
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -169,6 +171,7 @@ test "Cache LFU eviction policy" {
         .max_size = 50,
         .eviction_policy = .lfu,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -215,6 +218,7 @@ test "Cache FIFO eviction policy" {
         .max_size = 50,
         .eviction_policy = .fifo,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -253,6 +257,7 @@ test "Cache TTL expiration" {
         .eviction_policy = .lru,
         .ttl_seconds = 1, // 1 second TTL
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -279,6 +284,7 @@ test "Cache update operations" {
         .max_size = 1000,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -318,6 +324,7 @@ test "Cache remove operations" {
         .max_size = 1000,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -349,6 +356,7 @@ test "Cache clear operations" {
         .max_size = 1000,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -418,15 +426,17 @@ test "MultiLevelCache basic operations" {
     const allocator = testing.allocator;
     
     const l1_config = cache.CacheConfig{
-        .max_size = 100, // Small L1 cache
+        .max_size = 100,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     const l2_config = cache.CacheConfig{
         .max_size = 1000, // Larger L2 cache
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var multi_cache = cache.MultiLevelCache.init(allocator, l1_config, l2_config);
@@ -457,12 +467,14 @@ test "MultiLevelCache promotion logic" {
         .max_size = 50, // Very small L1 to force eviction
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     const l2_config = cache.CacheConfig{
         .max_size = 500,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var multi_cache = cache.MultiLevelCache.init(allocator, l1_config, l2_config);
@@ -492,6 +504,7 @@ test "Cache stress test with different value types" {
         .max_size = 10000,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -573,6 +586,7 @@ test "Cache deterministic behavior" {
         .max_size = 100,
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     // Create two identical caches
@@ -634,6 +648,7 @@ test "Cache edge cases and error handling" {
         .max_size = 10, // Very small cache
         .eviction_policy = .lru,
         .enable_stats = true,
+        .global_config = contextdb.config_mod.Config{},
     };
     
     var cache_instance = cache.Cache.init(allocator, config);
@@ -665,4 +680,21 @@ test "Cache edge cases and error handling" {
     const keys = try cache_instance.getKeys();
     defer keys.deinit();
     try testing.expect(keys.items.len >= 2);
+}
+
+test "Cache statistics tracking" {
+    var stats = cache.CacheStats.init(1000);
+    try testing.expect(stats.getHitRatio() == 0.0);
+    
+    stats.recordHit(1000, 0.1);
+    stats.recordMiss(1500, 0.1);
+    
+    try testing.expect(stats.hits == 1);
+    try testing.expect(stats.misses == 1);
+    try testing.expect(stats.getHitRatio() == 0.5);
+    
+    // Test moving average
+    stats.recordHit(2000, 0.1);
+    try testing.expect(stats.avg_access_time_ns > 1000);
+    try testing.expect(stats.avg_access_time_ns < 2000);
 } 

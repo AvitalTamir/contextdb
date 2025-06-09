@@ -1,0 +1,98 @@
+# ContextDB Configuration File
+# This file contains configuration settings for ContextDB
+# Copy this file to 'contextdb.conf' and modify as needed
+
+# Log Settings
+# The initial size of the append-only log file
+log_initial_size = 1MB
+
+# The maximum size the log file can grow to
+log_max_size = 1GB
+
+# Cache Settings
+# Exponential moving average smoothing factor for access time statistics
+cache_stats_alpha = 0.1
+
+# Initial capacity for cache hash tables
+cache_initial_capacity = 1000
+
+# Load factor threshold for cache resizing (0.0 to 1.0)
+cache_load_factor_threshold = 0.75
+
+# HTTP API Settings
+# Port for the HTTP API server
+http_port = 8080
+
+# Buffer size for HTTP requests (in bytes)
+http_request_buffer_size = 4096
+
+# Buffer size for HTTP responses (in bytes)
+http_response_buffer_size = 8192
+
+# Health Check Thresholds
+# Memory usage warning threshold (in GB)
+health_memory_warning_gb = 1.0
+
+# Memory usage critical threshold (in GB)
+health_memory_critical_gb = 2.0
+
+# Error rate warning threshold (percentage)
+health_error_rate_warning = 1.0
+
+# Error rate critical threshold (percentage)
+health_error_rate_critical = 5.0
+
+# Vector Search Configuration
+# Dimensionality of vectors (must match your data)
+vector_dimensions = 128
+
+# Default similarity threshold for threshold queries (0.0 to 1.0)
+vector_similarity_threshold = 0.5
+
+# HNSW (Hierarchical Navigable Small World) Configuration
+# Maximum connections per node in higher layers
+hnsw_max_connections = 16
+
+# Maximum connections per node in layer 0 (base layer)
+hnsw_max_connections_layer0 = 32
+
+# Size of dynamic candidate list during construction
+hnsw_ef_construction = 200
+
+# Level generation factor (1/ln(2) for exponential decay)
+hnsw_ml_factor = 0.693147
+
+# Random seed for deterministic HNSW behavior
+hnsw_random_seed = 42
+
+# Maximum number of layers in HNSW index
+hnsw_max_layers = 16
+
+# Vector Clustering Configuration
+# Maximum iterations for k-means clustering
+clustering_max_iterations = 100
+
+# Graph Traversal Configuration
+# Maximum depth for graph traversal queries (0-255)
+graph_max_traversal_depth = 10
+
+# Timeout for graph traversal operations (in milliseconds)
+graph_traversal_timeout_ms = 5000
+
+# Maximum queue size for BFS/DFS traversal (prevents memory exhaustion)
+graph_max_queue_size = 10000
+
+# Maximum neighbors to process per node (prevents combinatorial explosion)
+graph_max_neighbors_per_node = 1000
+
+# Cache size for shortest path queries
+graph_path_cache_size = 1000
+
+# Use bidirectional search for shortest paths (true/false)
+graph_enable_bidirectional_search = true
+
+# Future configuration sections will be added here as the system grows
+# For example:
+# vector_dimension = 128
+# checkpoint_interval = 5000
+# max_recovery_time = 30000 

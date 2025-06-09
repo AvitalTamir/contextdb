@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const config = @import("config.zig");
 
 /// Append-only binary log for ContextDB
 /// Follows TigerBeetle design principles: single-threaded, deterministic, no locks
@@ -11,12 +12,19 @@ pub const AppendLog = struct {
     max_size: usize,
     entry_count: u64,
     log_path: []const u8,
+    config: config.Config,
 
-    const INITIAL_SIZE = 1024 * 1024; // 1MB
-    const MAX_SIZE = 1024 * 1024 * 1024; // 1GB
     const ENTRY_SIZE = @sizeOf(types.LogEntry);
 
-    pub fn init(allocator: std.mem.Allocator, log_path: []const u8) !AppendLog {
+    pub fn init(allocator: std.mem.Allocator, log_path: []const u8, log_config: ?config.Config) !AppendLog {
+        // Use provided config or load from default location
+        const cfg = log_config orelse blk: {
+            const config_path = "contextdb.conf";
+            // Create default config if it doesn't exist
+            try config.Config.createDefaultIfMissing(config_path);
+            break :blk try config.Config.fromFile(allocator, config_path);
+        };
+
         // Create directories if they don't exist
         const dir = std.fs.path.dirname(log_path);
         if (dir) |d| {
@@ -30,7 +38,7 @@ pub const AppendLog = struct {
 
         // Get current file size
         const stat = try file.stat();
-        const current_size = if (stat.size == 0) INITIAL_SIZE else @as(usize, @intCast(stat.size));
+        const current_size = if (stat.size == 0) cfg.log_initial_size else @as(usize, @intCast(stat.size));
         
         // Extend file if needed
         if (stat.size < current_size) {
@@ -55,9 +63,10 @@ pub const AppendLog = struct {
             .file = file,
             .mmap = mmap,
             .current_size = current_size,
-            .max_size = MAX_SIZE,
+            .max_size = cfg.log_max_size,
             .entry_count = entry_count,
             .log_path = try allocator.dupe(u8, log_path),
+            .config = cfg,
         };
     }
 
@@ -178,12 +187,12 @@ pub const AppendLog = struct {
             
             // Truncate file to 0 and reset to initial size
             try self.file.setEndPos(0);
-            try self.file.setEndPos(INITIAL_SIZE);
+            try self.file.setEndPos(self.config.log_initial_size);
             
             // Remap with initial size
             self.mmap = try std.posix.mmap(
                 null,
-                INITIAL_SIZE,
+                self.config.log_initial_size,
                 std.posix.PROT.READ | std.posix.PROT.WRITE,
                 std.posix.MAP{ .TYPE = .SHARED },
                 self.file.handle,
@@ -192,10 +201,10 @@ pub const AppendLog = struct {
             
             // Zero out the memory to prevent reading stale data
             if (self.mmap) |mmap| {
-                @memset(mmap[0..INITIAL_SIZE], 0);
+                @memset(mmap[0..self.config.log_initial_size], 0);
             }
             
-            self.current_size = INITIAL_SIZE;
+            self.current_size = self.config.log_initial_size;
         } else {
             try self.file.setEndPos(new_size);
         }
@@ -316,7 +325,7 @@ test "AppendLog basic operations" {
     // Clean up any previous test file
     std.fs.cwd().deleteFile(log_path) catch {};
     
-    var log = try AppendLog.init(allocator, log_path);
+    var log = try AppendLog.init(allocator, log_path, null);
     defer log.deinit();
     defer std.fs.cwd().deleteFile(log_path) catch {};
 
@@ -343,7 +352,7 @@ test "AppendLog batch operations" {
     // Clean up any previous test file
     std.fs.cwd().deleteFile(log_path) catch {};
     
-    var log = try AppendLog.init(allocator, log_path);
+    var log = try AppendLog.init(allocator, log_path, null);
     defer log.deinit();
     defer std.fs.cwd().deleteFile(log_path) catch {};
 
@@ -376,4 +385,49 @@ test "BatchWriter functionality" {
     try batch.addEdge(types.Edge.init(1, 2, types.EdgeKind.links));
 
     try std.testing.expect(batch.entries.items.len == 2);
+}
+
+test "AppendLog with custom configuration" {
+    const allocator = std.testing.allocator;
+    const log_path = "test_config_log.bin";
+    
+    // Clean up any previous test file
+    std.fs.cwd().deleteFile(log_path) catch {};
+    defer std.fs.cwd().deleteFile(log_path) catch {};
+    
+    // Create custom configuration with different sizes
+    const custom_config = config.Config{
+        .log_initial_size = 512 * 1024, // 512KB instead of default 1MB
+        .log_max_size = 512 * 1024 * 1024, // 512MB instead of default 1GB
+    };
+    
+    var log = try AppendLog.init(allocator, log_path, custom_config);
+    defer log.deinit();
+    
+    // Verify the log is using our custom configuration
+    try std.testing.expect(log.config.log_initial_size == 512 * 1024);
+    try std.testing.expect(log.config.log_max_size == 512 * 1024 * 1024);
+    try std.testing.expect(log.current_size == 512 * 1024); // Should start with custom initial size
+    try std.testing.expect(log.max_size == 512 * 1024 * 1024); // Should use custom max size
+}
+
+test "AppendLog default configuration fallback" {
+    const allocator = std.testing.allocator;
+    const log_path = "test_default_log.bin";
+    
+    // Clean up any previous test file and config
+    std.fs.cwd().deleteFile(log_path) catch {};
+    std.fs.cwd().deleteFile("contextdb.conf") catch {};
+    defer std.fs.cwd().deleteFile(log_path) catch {};
+    defer std.fs.cwd().deleteFile("contextdb.conf") catch {};
+    
+    // Initialize without explicit config (should use defaults)
+    var log = try AppendLog.init(allocator, log_path, null);
+    defer log.deinit();
+    
+    // Verify the log is using default configuration
+    try std.testing.expect(log.config.log_initial_size == 1024 * 1024); // 1MB default
+    try std.testing.expect(log.config.log_max_size == 1024 * 1024 * 1024); // 1GB default
+    try std.testing.expect(log.current_size == 1024 * 1024);
+    try std.testing.expect(log.max_size == 1024 * 1024 * 1024);
 } 

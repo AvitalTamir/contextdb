@@ -22,11 +22,11 @@ test "HTTP API basic functionality" {
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config);
+    var db = try ContextDB.init(allocator, config, null);
     defer db.deinit();
 
     // Test ApiServer initialization
-    var api_server = http_api.ApiServer.init(allocator, &db, null, 8080);
+    var api_server = http_api.ApiServer.init(allocator, &db, null, 8080, null);
     defer api_server.stop();
 
     // Insert test data directly to database for testing queries
@@ -152,4 +152,56 @@ test "HTTP method parsing" {
     try testing.expect(http_api.HttpMethod.fromString("INVALID") == .UNKNOWN);
 
     std.debug.print("✓ HTTP method parsing test passed\n", .{});
+}
+
+test "HTTP API configuration integration" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Clean up any existing test data
+    std.fs.cwd().deleteTree("test_http_config_data") catch {};
+    defer std.fs.cwd().deleteTree("test_http_config_data") catch {};
+
+    // Initialize database
+    const db_config = ContextDBConfig{
+        .data_path = "test_http_config_data",
+        .enable_persistent_indexes = true,
+    };
+
+    var db = try ContextDB.init(allocator, db_config, null);
+    defer db.deinit();
+
+    // Create custom HTTP configuration
+    const http_config_data = contextdb.config_mod.Config{
+        .http_port = 9090,
+        .http_request_buffer_size = 2048,
+        .http_response_buffer_size = 4096,
+        .health_memory_warning_gb = 0.5,
+        .health_memory_critical_gb = 1.5,
+        .health_error_rate_warning = 2.0,
+        .health_error_rate_critical = 8.0,
+    };
+
+    // Test ApiServer with custom configuration
+    var api_server = http_api.ApiServer.init(allocator, &db, null, null, http_config_data);
+    defer api_server.stop();
+
+    // Verify configuration values are applied correctly
+    try testing.expect(api_server.port == 9090); // Port from config
+    try testing.expect(api_server.http_config.request_buffer_size == 2048);
+    try testing.expect(api_server.http_config.response_buffer_size == 4096);
+    try testing.expect(api_server.http_config.memory_warning_bytes == 500_000_000); // 0.5GB
+    try testing.expect(api_server.http_config.memory_critical_bytes == 1_500_000_000); // 1.5GB
+    try testing.expect(api_server.http_config.error_rate_warning == 2.0);
+    try testing.expect(api_server.http_config.error_rate_critical == 8.0);
+
+    // Test that port override works
+    var api_server_override = http_api.ApiServer.init(allocator, &db, null, 3000, http_config_data);
+    defer api_server_override.stop();
+
+    try testing.expect(api_server_override.port == 3000); // Port override takes precedence
+    try testing.expect(api_server_override.http_config.request_buffer_size == 2048); // Config values still used
+
+    std.debug.print("✓ HTTP API configuration integration test passed\n", .{});
 } 

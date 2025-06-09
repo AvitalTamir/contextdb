@@ -16,6 +16,7 @@ pub const raft_network = @import("raft_network.zig");
 pub const distributed_contextdb = @import("distributed_contextdb.zig");
 pub const http_api = @import("http_api.zig");
 pub const monitoring = @import("monitoring.zig");
+pub const config_mod = @import("config.zig");
 
 // Local aliases for internal use
 const types_local = types;
@@ -53,33 +54,43 @@ pub const ContextDB = struct {
     // Configuration
     config: ContextDBConfig,
 
-    pub fn init(allocator: std.mem.Allocator, config: ContextDBConfig) !ContextDB {
+    pub fn init(allocator: std.mem.Allocator, config: ContextDBConfig, global_config: ?config_mod.Config) !ContextDB {
         // Initialize append log
         const log_path = try std.fs.path.join(allocator, &[_][]const u8{ config.data_path, "contextdb.log" });
         defer allocator.free(log_path);
         
-        const append_log = try log.AppendLog.init(allocator, log_path);
+        const append_log = try log_local.AppendLog.init(allocator, log_path, global_config);
         
         // Initialize indexes
-        const graph_index = graph.GraphIndex.init(allocator);
-        const vector_index = vector.VectorIndex.init(allocator);
+        const graph_index = graph_local.GraphIndex.init(allocator);
+        const vector_index = vector_local.VectorIndex.init(allocator);
         
         // Initialize snapshot manager
-        const snapshot_manager = try snapshot.SnapshotManager.init(allocator, config.data_path);
+        const snapshot_manager = try snapshot_local.SnapshotManager.init(allocator, config.data_path);
         
         // Initialize persistent index manager
-        const persistent_index_manager = try persistent_index.PersistentIndexManager.init(allocator, config.data_path);
+        const persistent_index_manager = try persistent_index_local.PersistentIndexManager.init(allocator, config.data_path);
         
-        // Initialize query engines (no longer need pointers to indexes)
-        const graph_traversal = graph.GraphTraversal.init(allocator);
-        const vector_search = vector.VectorSearch.init(allocator);
+        // Initialize query engines with configuration
+        const graph_config = if (global_config) |global_cfg| 
+            graph_local.GraphConfig.fromConfig(global_cfg) 
+        else 
+            null;
+        const graph_traversal = graph_local.GraphTraversal.init(allocator, graph_config);
+        
+        // Configure vector search with global config if provided
+        const vector_config = if (global_config) |global_cfg| 
+            vector_local.VectorConfig.fromConfig(global_cfg) 
+        else 
+            null;
+        const vector_search = vector_local.VectorSearch.init(allocator, vector_config);
         
         // Initialize metrics collector
         const metrics = try monitoring.MetricsCollector.init(allocator);
         
         // Initialize S3 sync if configured
         const s3_sync = if (config.s3_bucket) |bucket| 
-            s3.S3SnapshotSync.init(allocator, bucket, config.s3_region orelse "us-east-1")
+            s3_local.S3SnapshotSync.init(allocator, bucket, config.s3_region orelse "us-east-1")
         else 
             null;
 
@@ -244,7 +255,7 @@ pub const ContextDB = struct {
     pub fn queryRelated(self: *ContextDB, start_node_id: u64, depth: u8) !std.ArrayList(types.Node) {
         const start_time = std.time.nanoTimestamp();
         
-        const result = self.graph_traversal.queryRelated(&self.graph_index, start_node_id, depth) catch |err| {
+        const result = self.graph_traversal.queryRelated(&self.graph_index, start_node_id, @as(?u8, depth)) catch |err| {
             self.metrics.recordQueryError();
             return err;
         };
@@ -687,7 +698,7 @@ pub fn demo() !void {
     };
 
     // Initialize database
-    var db = try ContextDB.init(allocator, config);
+    var db = try ContextDB.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("demo_contextdb") catch {};
 
@@ -771,7 +782,7 @@ test "ContextDB basic operations" {
         .s3_prefix = null,
     };
 
-    var db = try ContextDB.init(allocator, config);
+    var db = try ContextDB.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("test_contextdb") catch {};
 

@@ -26,7 +26,7 @@ test "ContextDB full integration test" {
         .s3_prefix = null,
     };
 
-    var db = try main.ContextDB.init(allocator, config);
+    var db = try main.ContextDB.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("integration_test_db") catch {};
 
@@ -135,7 +135,7 @@ test "ContextDB deterministic queries" {
         .s3_prefix = null,
     };
 
-    var db = try main.ContextDB.init(allocator, config);
+    var db = try main.ContextDB.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("deterministic_test_db") catch {};
 
@@ -218,7 +218,7 @@ test "ContextDB crash recovery simulation" {
 
     // Phase 1: Create initial database and add data
     {
-        var db = try main.ContextDB.init(allocator, config);
+        var db = try main.ContextDB.init(allocator, config, null);
         defer db.deinit();
 
         // Add some data that should be in the snapshot
@@ -243,7 +243,7 @@ test "ContextDB crash recovery simulation" {
 
     // Phase 2: Simulate crash and recovery
     {
-        var db = try main.ContextDB.init(allocator, config);
+        var db = try main.ContextDB.init(allocator, config, null);
         defer db.deinit();
 
         // Load from storage (should recover from snapshot + log)
@@ -274,7 +274,7 @@ test "ContextDB performance and memory usage" {
         .s3_prefix = null,
     };
 
-    var db = try main.ContextDB.init(allocator, config);
+    var db = try main.ContextDB.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("perf_test_db") catch {};
 

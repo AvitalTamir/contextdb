@@ -292,7 +292,7 @@ test "ContextDB metrics integration" {
         .s3_prefix = null,
     };
 
-    var db = try contextdb.ContextDB.init(allocator, config);
+    var db = try contextdb.ContextDB.init(allocator, config, null);
     defer db.deinit();
 
     // Initial metrics should be zero

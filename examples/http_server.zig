@@ -59,7 +59,7 @@ pub fn main() !void {
     }
 
     // Initialize HTTP API server
-    var api_server = http_api.ApiServer.init(allocator, &db, null, port);
+    var api_server = http_api.ApiServer.init(allocator, &db, null, port, null);
     defer api_server.stop();
 
     std.debug.print("Starting HTTP server...\n\n", .{});

@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const config = @import("config.zig");
 
 /// High-Performance Caching System
 /// Provides intelligent caching with multiple eviction policies
@@ -54,25 +55,24 @@ pub const CacheStats = struct {
         return @as(f32, @floatFromInt(self.total_size)) / @as(f32, @floatFromInt(self.max_size));
     }
     
-    pub fn recordHit(self: *CacheStats, access_time_ns: u64) void {
+    pub fn recordHit(self: *CacheStats, access_time_ns: u64, alpha: f32) void {
         self.hits += 1;
-        self.updateAverageAccessTime(access_time_ns);
+        self.updateAverageAccessTime(access_time_ns, alpha);
     }
     
-    pub fn recordMiss(self: *CacheStats, access_time_ns: u64) void {
+    pub fn recordMiss(self: *CacheStats, access_time_ns: u64, alpha: f32) void {
         self.misses += 1;
-        self.updateAverageAccessTime(access_time_ns);
+        self.updateAverageAccessTime(access_time_ns, alpha);
     }
     
-    fn updateAverageAccessTime(self: *CacheStats, access_time_ns: u64) void {
+    fn updateAverageAccessTime(self: *CacheStats, access_time_ns: u64, alpha: f32) void {
         const total_accesses = self.hits + self.misses;
         if (total_accesses == 1) {
             self.avg_access_time_ns = access_time_ns;
         } else {
-            // Exponential moving average
-            const alpha = 0.1;
-            const new_avg = @as(f64, @floatFromInt(self.avg_access_time_ns)) * (1.0 - alpha) + 
-                          @as(f64, @floatFromInt(access_time_ns)) * alpha;
+            // Exponential moving average with configurable alpha
+            const new_avg = @as(f64, @floatFromInt(self.avg_access_time_ns)) * (1.0 - @as(f64, alpha)) + 
+                          @as(f64, @floatFromInt(access_time_ns)) * @as(f64, alpha);
             self.avg_access_time_ns = @intFromFloat(new_avg);
         }
     }
@@ -86,6 +86,18 @@ pub const CacheConfig = struct {
     enable_stats: bool = true,
     initial_capacity: u32 = 1000,
     load_factor_threshold: f32 = 0.75, // When to resize
+    
+    // Store centralized config for access to global settings
+    global_config: config.Config,
+    
+    pub fn fromConfig(global_cfg: config.Config, max_size: u64) CacheConfig {
+        return CacheConfig{
+            .max_size = max_size,
+            .initial_capacity = global_cfg.cache_initial_capacity,
+            .load_factor_threshold = global_cfg.cache_load_factor_threshold,
+            .global_config = global_cfg,
+        };
+    }
 };
 
 /// Cache entry metadata
@@ -322,13 +334,13 @@ pub const Cache = struct {
     stats: CacheStats,
     prng: std.Random.DefaultPrng, // For random eviction
     
-    pub fn init(allocator: std.mem.Allocator, config: CacheConfig) Cache {
+    pub fn init(allocator: std.mem.Allocator, cache_config: CacheConfig) Cache {
         return Cache{
             .allocator = allocator,
-            .config = config,
+            .config = cache_config,
             .entries = std.AutoHashMap(u64, CacheEntry).init(allocator),
             .lru_list = LRUList.init(allocator),
-            .stats = CacheStats.init(config.max_size),
+            .stats = CacheStats.init(cache_config.max_size),
             .prng = std.Random.DefaultPrng.init(42), // Deterministic for testing
         };
     }
@@ -355,7 +367,7 @@ pub const Cache = struct {
                     self.remove(key);
                     const elapsed = timer.lap();
                     if (self.config.enable_stats) {
-                        self.stats.recordMiss(elapsed);
+                        self.stats.recordMiss(elapsed, self.config.global_config.cache_stats_alpha);
                     }
                     return null;
                 }
@@ -371,14 +383,14 @@ pub const Cache = struct {
             
             const elapsed = timer.lap();
             if (self.config.enable_stats) {
-                self.stats.recordHit(elapsed);
+                self.stats.recordHit(elapsed, self.config.global_config.cache_stats_alpha);
             }
             
             return entry.value.clone(self.allocator) catch null;
         } else {
             const elapsed = timer.lap();
             if (self.config.enable_stats) {
-                self.stats.recordMiss(elapsed);
+                self.stats.recordMiss(elapsed, self.config.global_config.cache_stats_alpha);
             }
             return null;
         }
@@ -690,4 +702,36 @@ pub const CacheKeys = struct {
         
         return hash;
     }
-}; 
+};
+
+test "Cache with custom configuration" {
+    const allocator = std.testing.allocator;
+    
+    // Create custom configuration
+    const global_cfg = config.Config{
+        .cache_stats_alpha = 0.3,
+        .cache_initial_capacity = 500,
+        .cache_load_factor_threshold = 0.6,
+    };
+    
+    const cache_cfg = CacheConfig.fromConfig(global_cfg, 1024);
+    
+    // Verify configuration values are applied
+    try std.testing.expect(cache_cfg.initial_capacity == 500);
+    try std.testing.expect(cache_cfg.load_factor_threshold == 0.6);
+    try std.testing.expect(cache_cfg.global_config.cache_stats_alpha == 0.3);
+    try std.testing.expect(cache_cfg.max_size == 1024);
+    
+    var cache = Cache.init(allocator, cache_cfg);
+    defer cache.deinit();
+    
+    // Test that the cache uses the custom config
+    const test_value = CacheValue{ .integer = 42 };
+    try cache.put(1, test_value);
+    
+    const retrieved = cache.get(1);
+    try std.testing.expect(retrieved != null);
+    if (retrieved) |val| {
+        try std.testing.expect(val.integer == 42);
+    }
+} 

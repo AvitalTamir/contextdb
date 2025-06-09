@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const config = @import("config.zig");
 
 /// In-memory graph index for fast traversal
 /// Uses adjacency lists for efficient neighbor queries
@@ -151,15 +152,19 @@ pub const GraphIndex = struct {
 /// Graph traversal engine for complex queries
 pub const GraphTraversal = struct {
     allocator: std.mem.Allocator,
+    config: GraphConfig,
 
-    pub fn init(allocator: std.mem.Allocator) GraphTraversal {
+    pub fn init(allocator: std.mem.Allocator, graph_config: ?GraphConfig) GraphTraversal {
+        const cfg = graph_config orelse GraphConfig.fromConfig(config.Config{});
         return GraphTraversal{
             .allocator = allocator,
+            .config = cfg,
         };
     }
 
-    /// Breadth-first search traversal with depth limit
-    pub fn queryRelated(self: *const GraphTraversal, index: *const GraphIndex, start_node_id: u64, max_depth: u8) !std.ArrayList(types.Node) {
+    /// Breadth-first search traversal with depth limit (uses config default or provided max_depth)
+    pub fn queryRelated(self: *const GraphTraversal, index: *const GraphIndex, start_node_id: u64, max_depth: ?u8) !std.ArrayList(types.Node) {
+        const actual_max_depth = max_depth orelse self.config.max_traversal_depth;
         var result = std.ArrayList(types.Node).init(self.allocator);
         var visited = std.AutoHashMap(u64, void).init(self.allocator);
         defer visited.deinit();
@@ -174,19 +179,21 @@ pub const GraphTraversal = struct {
         while (queue.items.len > 0) {
             const current = queue.orderedRemove(0);
             
-            if (current.depth > max_depth) continue;
+            if (current.depth > actual_max_depth) continue;
 
             // Add current node to result
             if (index.getNode(current.node_id)) |node| {
                 try result.append(node);
             }
 
-            // Add neighbors to queue if within depth limit
-            if (current.depth < max_depth) {
+            // Add neighbors to queue if within depth limit and queue size limit
+            if (current.depth < actual_max_depth and queue.items.len < self.config.max_queue_size) {
                 const neighbors = try index.getNeighbors(current.node_id, self.allocator);
                 defer neighbors.deinit();
 
-                for (neighbors.items) |neighbor_id| {
+                // Limit the number of neighbors processed per node
+                const max_neighbors = @min(neighbors.items.len, self.config.max_neighbors_per_node);
+                for (neighbors.items[0..max_neighbors]) |neighbor_id| {
                     if (!visited.contains(neighbor_id)) {
                         try queue.append(.{ .node_id = neighbor_id, .depth = current.depth + 1 });
                         try visited.put(neighbor_id, {});
@@ -198,13 +205,16 @@ pub const GraphTraversal = struct {
         return result;
     }
 
-    /// Find shortest path between two nodes using BFS
+    /// Find shortest path between two nodes using BFS (with optional timeout)
     pub fn findShortestPath(self: *const GraphTraversal, index: *const GraphIndex, start_id: u64, end_id: u64) !?std.ArrayList(u64) {
         if (start_id == end_id) {
             var path = std.ArrayList(u64).init(self.allocator);
             try path.append(start_id);
             return path;
         }
+
+        const start_time = std.time.nanoTimestamp();
+        const timeout_ns = @as(i64, @intCast(self.config.traversal_timeout_ms)) * 1_000_000; // Convert ms to ns
 
         var visited = std.AutoHashMap(u64, void).init(self.allocator);
         defer visited.deinit();
@@ -219,6 +229,17 @@ pub const GraphTraversal = struct {
         try visited.put(start_id, {});
 
         while (queue.items.len > 0) {
+            // Check timeout
+            const elapsed_time = std.time.nanoTimestamp() - start_time;
+            if (elapsed_time > timeout_ns) {
+                return null; // Timeout reached
+            }
+
+            // Check queue size limit
+            if (queue.items.len > self.config.max_queue_size) {
+                return null; // Queue size limit exceeded
+            }
+
             const current_id = queue.orderedRemove(0);
             
             if (current_id == end_id) {
@@ -238,7 +259,9 @@ pub const GraphTraversal = struct {
             const neighbors = try index.getNeighbors(current_id, self.allocator);
             defer neighbors.deinit();
 
-            for (neighbors.items) |neighbor_id| {
+            // Limit the number of neighbors processed per node
+            const max_neighbors = @min(neighbors.items.len, self.config.max_neighbors_per_node);
+            for (neighbors.items[0..max_neighbors]) |neighbor_id| {
                 if (!visited.contains(neighbor_id)) {
                     try visited.put(neighbor_id, {});
                     try parent.put(neighbor_id, current_id);
@@ -257,7 +280,8 @@ pub const GraphTraversal = struct {
         switch (direction) {
             .outgoing => {
                 if (index.getOutgoingEdges(start_node_id)) |edges| {
-                    for (edges) |edge| {
+                    const max_edges = @min(edges.len, self.config.max_neighbors_per_node);
+                    for (edges[0..max_edges]) |edge| {
                         if (edge.getKind() == edge_kind) {
                             if (index.getNode(edge.to)) |node| {
                                 try result.append(node);
@@ -268,7 +292,8 @@ pub const GraphTraversal = struct {
             },
             .incoming => {
                 if (index.getIncomingEdges(start_node_id)) |edges| {
-                    for (edges) |edge| {
+                    const max_edges = @min(edges.len, self.config.max_neighbors_per_node);
+                    for (edges[0..max_edges]) |edge| {
                         if (edge.getKind() == edge_kind) {
                             if (index.getNode(edge.from)) |node| {
                                 try result.append(node);
@@ -305,6 +330,27 @@ pub const GraphTraversal = struct {
         }
         
         return degree;
+    }
+};
+
+/// Graph configuration derived from centralized config
+pub const GraphConfig = struct {
+    max_traversal_depth: u8,
+    traversal_timeout_ms: u32,
+    max_queue_size: u32,
+    max_neighbors_per_node: u32,
+    path_cache_size: u32,
+    enable_bidirectional_search: bool,
+    
+    pub fn fromConfig(global_cfg: config.Config) GraphConfig {
+        return GraphConfig{
+            .max_traversal_depth = global_cfg.graph_max_traversal_depth,
+            .traversal_timeout_ms = global_cfg.graph_traversal_timeout_ms,
+            .max_queue_size = global_cfg.graph_max_queue_size,
+            .max_neighbors_per_node = global_cfg.graph_max_neighbors_per_node,
+            .path_cache_size = global_cfg.graph_path_cache_size,
+            .enable_bidirectional_search = global_cfg.graph_enable_bidirectional_search,
+        };
     }
 };
 
@@ -356,7 +402,7 @@ test "GraphTraversal BFS" {
     try graph.addEdge(types.Edge.init(1, 2, types.EdgeKind.owns));
     try graph.addEdge(types.Edge.init(2, 3, types.EdgeKind.owns));
 
-    const traversal = GraphTraversal.init(allocator);
+    const traversal = GraphTraversal.init(allocator, null);
     
     // Test related query with depth 2
     const related = try traversal.queryRelated(&graph, 1, 2);
@@ -389,7 +435,7 @@ test "GraphTraversal edge kind filtering" {
     try graph.addEdge(types.Edge.init(1, 2, types.EdgeKind.owns));
     try graph.addEdge(types.Edge.init(1, 3, types.EdgeKind.links));
 
-    const traversal = GraphTraversal.init(allocator);
+    const traversal = GraphTraversal.init(allocator, null);
     
     // Query only 'owns' relationships
     const owns_related = try traversal.queryByEdgeKind(&graph, 1, types.EdgeKind.owns, .outgoing);
@@ -397,4 +443,205 @@ test "GraphTraversal edge kind filtering" {
     
     try std.testing.expect(owns_related.items.len == 1);
     try std.testing.expect(owns_related.items[0].id == 2);
+}
+
+test "Graph configuration integration" {
+    const allocator = std.testing.allocator;
+    
+    // Create custom graph configuration
+    const graph_cfg = GraphConfig{
+        .max_traversal_depth = 5,
+        .traversal_timeout_ms = 1000,
+        .max_queue_size = 100,
+        .max_neighbors_per_node = 50,
+        .path_cache_size = 200,
+        .enable_bidirectional_search = false,
+    };
+    
+    // Test GraphTraversal with custom config
+    const traversal = GraphTraversal.init(allocator, graph_cfg);
+    try std.testing.expect(traversal.config.max_traversal_depth == 5);
+    try std.testing.expect(traversal.config.traversal_timeout_ms == 1000);
+    try std.testing.expect(traversal.config.max_queue_size == 100);
+    try std.testing.expect(traversal.config.max_neighbors_per_node == 50);
+    try std.testing.expect(traversal.config.path_cache_size == 200);
+    try std.testing.expect(traversal.config.enable_bidirectional_search == false);
+    
+    // Test default config fallback
+    const traversal_default = GraphTraversal.init(allocator, null);
+    try std.testing.expect(traversal_default.config.max_traversal_depth == 10);
+    try std.testing.expect(traversal_default.config.traversal_timeout_ms == 5000);
+    try std.testing.expect(traversal_default.config.max_queue_size == 10000);
+    try std.testing.expect(traversal_default.config.max_neighbors_per_node == 1000);
+    try std.testing.expect(traversal_default.config.path_cache_size == 1000);
+    try std.testing.expect(traversal_default.config.enable_bidirectional_search == true);
+}
+
+test "GraphTraversal with depth limits" {
+    const allocator = std.testing.allocator;
+    
+    var graph = GraphIndex.init(allocator);
+    defer graph.deinit();
+
+    // Create a chain of nodes: 1 -> 2 -> 3 -> 4 -> 5
+    try graph.addNode(types.Node.init(1, "Node1"));
+    try graph.addNode(types.Node.init(2, "Node2"));
+    try graph.addNode(types.Node.init(3, "Node3"));
+    try graph.addNode(types.Node.init(4, "Node4"));
+    try graph.addNode(types.Node.init(5, "Node5"));
+    
+    try graph.addEdge(types.Edge.init(1, 2, types.EdgeKind.owns));
+    try graph.addEdge(types.Edge.init(2, 3, types.EdgeKind.owns));
+    try graph.addEdge(types.Edge.init(3, 4, types.EdgeKind.owns));
+    try graph.addEdge(types.Edge.init(4, 5, types.EdgeKind.owns));
+
+    // Create config with smaller depth limit
+    const graph_cfg = GraphConfig{
+        .max_traversal_depth = 2,
+        .traversal_timeout_ms = 5000,
+        .max_queue_size = 1000,
+        .max_neighbors_per_node = 100,
+        .path_cache_size = 100,
+        .enable_bidirectional_search = true,
+    };
+    
+    const traversal = GraphTraversal.init(allocator, graph_cfg);
+    
+    // Test with no explicit depth (uses config default of 2)
+    const related_default = try traversal.queryRelated(&graph, 1, null);
+    defer related_default.deinit();
+    
+    // Should only find nodes 1, 2, 3 (depth 0, 1, 2)
+    try std.testing.expect(related_default.items.len == 3);
+    
+    // Test with explicit depth that overrides config
+    const related_explicit = try traversal.queryRelated(&graph, 1, 3);
+    defer related_explicit.deinit();
+    
+    // Should find nodes 1, 2, 3, 4 (depth 0, 1, 2, 3)
+    try std.testing.expect(related_explicit.items.len == 4);
+}
+
+test "GraphTraversal with neighbor limits" {
+    const allocator = std.testing.allocator;
+    
+    var graph = GraphIndex.init(allocator);
+    defer graph.deinit();
+
+    // Create a central node with many connections
+    try graph.addNode(types.Node.init(1, "Central"));
+    
+    // Add many connected nodes
+    for (2..12) |i| {
+        const node_id: u64 = @intCast(i);
+        const label = try std.fmt.allocPrint(allocator, "Node{}", .{i});
+        defer allocator.free(label);
+        try graph.addNode(types.Node.init(node_id, label));
+        try graph.addEdge(types.Edge.init(1, node_id, types.EdgeKind.owns));
+    }
+
+    // Create config with neighbor limit
+    const graph_cfg = GraphConfig{
+        .max_traversal_depth = 2,
+        .traversal_timeout_ms = 5000,
+        .max_queue_size = 1000,
+        .max_neighbors_per_node = 5, // Limit to 5 neighbors
+        .path_cache_size = 100,
+        .enable_bidirectional_search = true,
+    };
+    
+    const traversal = GraphTraversal.init(allocator, graph_cfg);
+    
+    // Test with neighbor limit
+    const related = try traversal.queryRelated(&graph, 1, 1);
+    defer related.deinit();
+    
+    // Should find central node + at most 5 neighbors (6 total)
+    try std.testing.expect(related.items.len <= 6);
+}
+
+test "Graph configuration integration with global config" {
+    const allocator = std.testing.allocator;
+    
+    // Create a global configuration with custom graph settings
+    const global_cfg = config.Config{
+        .graph_max_traversal_depth = 8,
+        .graph_traversal_timeout_ms = 2000,
+        .graph_max_queue_size = 5000,
+        .graph_max_neighbors_per_node = 500,
+        .graph_path_cache_size = 800,
+        .graph_enable_bidirectional_search = false,
+    };
+    
+    // Test GraphConfig.fromConfig
+    const graph_cfg = GraphConfig.fromConfig(global_cfg);
+    try std.testing.expect(graph_cfg.max_traversal_depth == 8);
+    try std.testing.expect(graph_cfg.traversal_timeout_ms == 2000);
+    try std.testing.expect(graph_cfg.max_queue_size == 5000);
+    try std.testing.expect(graph_cfg.max_neighbors_per_node == 500);
+    try std.testing.expect(graph_cfg.path_cache_size == 800);
+    try std.testing.expect(graph_cfg.enable_bidirectional_search == false);
+    
+    // Test GraphTraversal with global config
+    const traversal = GraphTraversal.init(allocator, graph_cfg);
+    try std.testing.expect(traversal.config.max_traversal_depth == 8);
+    try std.testing.expect(traversal.config.traversal_timeout_ms == 2000);
+    try std.testing.expect(traversal.config.max_queue_size == 5000);
+    try std.testing.expect(traversal.config.max_neighbors_per_node == 500);
+    try std.testing.expect(traversal.config.path_cache_size == 800);
+    try std.testing.expect(traversal.config.enable_bidirectional_search == false);
+    
+    std.debug.print("✓ Graph configuration integration test passed\n", .{});
+}
+
+test "End-to-end graph configuration demonstration" {
+    const allocator = std.testing.allocator;
+    
+    // Simulate configuration loading from file
+    const config_content =
+        \\# Graph configuration test
+        \\graph_max_traversal_depth = 3
+        \\graph_traversal_timeout_ms = 1000
+        \\graph_max_queue_size = 500
+        \\graph_max_neighbors_per_node = 10
+        \\graph_path_cache_size = 100
+        \\graph_enable_bidirectional_search = false
+    ;
+    
+    // Parse configuration
+    const global_cfg = try config.Config.parseFromString(config_content);
+    
+    // Create graph configuration from global config
+    const graph_cfg = GraphConfig.fromConfig(global_cfg);
+    
+    // Create graph and traversal with config
+    var graph = GraphIndex.init(allocator);
+    defer graph.deinit();
+    
+    const traversal = GraphTraversal.init(allocator, graph_cfg);
+    
+    // Create test data
+    try graph.addNode(types.Node.init(1, "Start"));
+    try graph.addNode(types.Node.init(2, "Middle1"));
+    try graph.addNode(types.Node.init(3, "Middle2"));
+    try graph.addNode(types.Node.init(4, "End"));
+    try graph.addNode(types.Node.init(5, "TooFar"));
+    
+    try graph.addEdge(types.Edge.init(1, 2, types.EdgeKind.owns));
+    try graph.addEdge(types.Edge.init(2, 3, types.EdgeKind.owns));
+    try graph.addEdge(types.Edge.init(3, 4, types.EdgeKind.owns));
+    try graph.addEdge(types.Edge.init(4, 5, types.EdgeKind.owns));
+    
+    // Test traversal respects configured depth limit (3)
+    const related = try traversal.queryRelated(&graph, 1, null);
+    defer related.deinit();
+    
+    // Should find nodes 1, 2, 3, 4 (depths 0, 1, 2, 3) but not 5 (depth 4)
+    try std.testing.expect(related.items.len == 4);
+    
+    // Verify configuration is working
+    try std.testing.expect(traversal.config.max_traversal_depth == 3);
+    try std.testing.expect(traversal.config.max_neighbors_per_node == 10);
+    
+    std.debug.print("✓ End-to-end graph configuration test passed\n", .{});
 } 
