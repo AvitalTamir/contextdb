@@ -14,6 +14,7 @@ pub const persistent_index = @import("persistent_index.zig");
 pub const raft = @import("raft.zig");
 pub const raft_network = @import("raft_network.zig");
 pub const distributed_contextdb = @import("distributed_contextdb.zig");
+pub const http_api = @import("http_api.zig");
 
 // Local aliases for internal use
 const types_local = types;

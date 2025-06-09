@@ -137,6 +137,17 @@ pub fn build(b: *std.Build) void {
     const test_raft_run = b.addRunArtifact(test_raft_exe);
     test_raft_step.dependOn(&test_raft_run.step);
 
+    // HTTP API tests
+    const test_http_api_step = b.step("test-http-api", "Run HTTP API tests");
+    const test_http_api_exe = b.addTest(.{
+        .root_source_file = b.path("test/test_http_api.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_http_api_exe.root_module.addImport("contextdb", contextdb_module);
+    const test_http_api_run = b.addRunArtifact(test_http_api_exe);
+    test_http_api_step.dependOn(&test_http_api_run.step);
+
     const test_all_step = b.step("test-all", "Run all tests");
     test_all_step.dependOn(&run_unit_tests.step);
     test_all_step.dependOn(&run_hnsw_basic_tests.step);
@@ -145,6 +156,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_parallel_tests.step);
     test_all_step.dependOn(&run_persistent_index_tests.step);
     test_all_step.dependOn(&test_raft_run.step);
+    test_all_step.dependOn(&test_http_api_run.step);
 
     // Add distributed demo
     const distributed_demo_step = b.step("demo-distributed", "Run distributed ContextDB demo");
@@ -157,4 +169,30 @@ pub fn build(b: *std.Build) void {
     distributed_demo_exe.root_module.addImport("contextdb", contextdb_module);
     const distributed_demo_run = b.addRunArtifact(distributed_demo_exe);
     distributed_demo_step.dependOn(&distributed_demo_run.step);
+
+    // Add HTTP server example
+    const http_server_step = b.step("http-server", "Run ContextDB HTTP API server");
+    const http_server_exe = b.addExecutable(.{
+        .name = "http_server",
+        .root_source_file = b.path("examples/http_server.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    http_server_exe.root_module.addImport("contextdb", contextdb_module);
+    const http_server_run = b.addRunArtifact(http_server_exe);
+    if (b.args) |args| {
+        http_server_run.addArgs(args);
+    }
+    http_server_step.dependOn(&http_server_run.step);
+
+    // Add HTTP client demo
+    const http_client_demo_step = b.step("http-client-demo", "Show ContextDB HTTP API usage examples");
+    const http_client_demo_exe = b.addExecutable(.{
+        .name = "http_client_demo",
+        .root_source_file = b.path("examples/http_client_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const http_client_demo_run = b.addRunArtifact(http_client_demo_exe);
+    http_client_demo_step.dependOn(&http_client_demo_run.step);
 } 
