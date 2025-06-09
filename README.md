@@ -57,7 +57,7 @@ ContextDB combines the power of **graph traversal** and **vector similarity sear
 
 ## 🌐 HTTP REST API
 
-ContextDB now includes a **production-ready HTTP REST API** that makes it accessible from any programming language!
+ContextDB includes a **production-ready HTTP REST API** that makes it accessible from any programming language!
 
 ### Quick Start with HTTP API
 
@@ -485,15 +485,24 @@ On a typical development machine (100 items):
 
 ```
 src/
-├── main.zig        # Main ContextDB engine
-├── types.zig       # Core data types
-├── log.zig         # Append-only logging
-├── graph.zig       # Graph indexing and traversal
-├── vector.zig      # Vector indexing and similarity
-├── snapshot.zig    # Iceberg-style snapshots
-└── s3.zig          # S3 integration
+├── main.zig                    # Main ContextDB engine (29KB, 801 lines)
+├── types.zig                   # Core data types (7.6KB, 269 lines)
+├── log.zig                     # Append-only logging (12KB, 379 lines)
+├── graph.zig                   # Graph indexing and traversal (14KB, 400 lines)
+├── vector.zig                  # Vector indexing and HNSW similarity (32KB, 875 lines)
+├── snapshot.zig                # Iceberg-style snapshots (29KB, 713 lines)
+├── s3.zig                      # S3 integration (15KB, 362 lines)
+├── distributed_contextdb.zig   # Distributed database coordination (16KB, 412 lines)
+├── raft.zig                    # Raft consensus protocol (16KB, 489 lines)
+├── raft_network.zig            # Raft network communication (12KB, 356 lines)
+├── http_api.zig                # HTTP REST API server (34KB, 838 lines)
+├── monitoring.zig              # Metrics and health monitoring (28KB, 682 lines)
+├── cache.zig                   # High-performance caching system (21KB, 693 lines)
+├── parallel.zig                # Multi-threaded processing (26KB, 751 lines)
+├── persistent_index.zig        # Memory-mapped disk indexes (21KB, 582 lines)
+└── query_optimizer.zig         # Query planning and optimization (18KB, 474 lines)
 test/
-└── test_query.zig  # Comprehensive tests
+└── test_*.zig              # Comprehensive tests
 ```
 
 ### Design Principles
@@ -504,171 +513,37 @@ test/
 4. **Performance**: Fast paths avoid allocations
 5. **Modularity**: Components can be tested in isolation
 
-## 🔄 Production Roadmap
+## 🚀 Development Roadmap
 
-### Current Status
-- ✅ Basic hybrid queries (graph + vector)
-- ✅ Append-only logging with crash recovery
-- ✅ Iceberg-style immutable snapshots
-- ✅ S3 integration for cloud persistence
-- ✅ Memory leak-free operation
-- ✅ Full test coverage (4/4 tests passing)
-- ✅ **HNSW Vector Indexing** - Advanced O(log n) vector search
-- ✅ **Query Optimization Engine** - Intelligent query planning and caching
-- ✅ **Caching System** - High-performance memory caches
-- ✅ **Parallel Processing System** - Multi-threaded work distribution
-- ✅ **Memory-Mapped Persistent Indexes** - Instant startup via disk-backed indexes
-- ✅ **Distributed Consensus (Raft)** - Multi-node replication with leader election
-- ✅ **HTTP REST API** - Production-ready web API for language-agnostic access
+### Completed Systems ✅
 
-### 🎯 **Priority 1: Performance & Scalability**
+- **✅ HNSW Vector Indexing** - O(log n) vector search with hierarchical navigable small world graphs
+- **✅ Query Optimization Engine** - Intelligent query planning, cost estimation, and result caching  
+- **✅ Caching System** - High-performance LRU/LFU memory caches with configurable eviction policies
+- **✅ Parallel Processing System** - Multi-threaded work distribution with dynamic load balancing
+- **✅ Memory-Mapped Persistent Indexes** - Instant startup via disk-backed indexes with crash-safe persistence
+- **✅ Distributed Consensus (Raft)** - Multi-node replication with leader election and log consensus
+- **✅ HTTP REST API** - Production-ready web API with comprehensive endpoints for language-agnostic access
+- **✅ Monitoring & Metrics** - Prometheus-compatible metrics with comprehensive observability and health checks
 
-#### 1. **Advanced Vector Indexing** (Highest Impact)
-- **Status**: ✅ **COMPLETED** - HNSW implementation finished
-- **Impact**: Scales from O(n) to O(log n) for vector queries
-- **Goal**: Support millions of vectors with sub-millisecond search ✅ **ACHIEVED**
+### Next Priority Systems 🎯
 
-#### 2. **Memory-Mapped Persistent Indexes** (High Impact)
-- **Status**: 🚧 Ready to implement
-- **Impact**: Dramatically faster startup (milliseconds vs. seconds)
-- **Goal**: Zero-rebuild recovery from disk-backed indexes
-- **Implementation**: Memory-mapped graph adjacency lists and vector indexes
+#### **Priority 1: Production Operations**
+- **🔄 Advanced Configuration System** - Environment-based and file-based configuration for production tuning
+- **🔄 Structured Logging** - Professional debugging and audit trails with JSON output and log rotation
+- **🔄 Graceful Degradation** - Resource-aware operation with intelligent limits and automatic cleanup
 
-#### 3. **Batch Processing Optimization** (High Impact)
-- **Status**: ✅ **COMPLETED** - Parallel processing system implemented
-- **Impact**: 10-100x throughput improvement for bulk operations ✅ **ACHIEVED**
-- **Goal**: Zero-allocation hot paths with SIMD optimizations
+#### **Priority 2: Reliability & Safety**
+- **🔄 Write-Ahead Log Improvements** - CRC32 checksums, corruption detection, and self-healing append log
+- **🔄 Advanced Query Language (ContextQL)** - SQL-like syntax for complex hybrid graph+vector queries
+- **🔄 Horizontal Sharding** - Automatic data partitioning across multiple nodes for massive scale
 
-### 🔧 **Priority 2: Production Operations**
+#### **Priority 3: Advanced Features**
+- **🔄 Real-time Replication** - Master-slave replication with consistency guarantees and failover
+- **🔄 Compression Engine** - LZ4/Zstd compression for storage and network efficiency
+- **🔄 Advanced Analytics** - Built-in graph algorithms (PageRank, community detection, centrality measures)
 
-#### 4. **Monitoring & Metrics** (Critical for Production)
-- **Status**: ✅ **COMPLETED** - Comprehensive monitoring system implemented
-- **Impact**: Essential for production observability ✅ **ACHIEVED**
-- **Goal**: Prometheus-compatible metrics and health checks ✅ **ACHIEVED**
-- **Features**: ✅ **ALL IMPLEMENTED**
-  - Query latency histograms with P95/P99 percentiles
-  - Insert rate counters with real-time tracking
-  - Memory usage gauges with resource monitoring
-  - Error rate tracking with comprehensive categorization
-  - `/health` endpoint with multi-dimensional health checks
-  - `/metrics` endpoint with JSON and Prometheus formats
-  - Complete integration with all database operations
-  - Thread-safe atomic counters and gauges
-
-#### 5. **Production Configuration System** (High Impact)
-- **Status**: 🚧 Ready to implement
-- **Impact**: Eliminates hard-coded values, enables tuning
-- **Goal**: Environment-based and file-based configuration
-- **Features**:
-  ```zig
-  pub const ProductionConfig = struct {
-      // Performance tuning
-      vector_index_type: enum { linear, hnsw, ivf } = .hnsw,
-      hnsw_max_connections: u16 = 16,
-      batch_size: u32 = 1000,
-      
-      // Resource limits  
-      max_memory_mb: u32 = 4096,
-      max_log_size_mb: u32 = 1024,
-      
-      // Reliability
-      checkpoint_interval_ms: u32 = 5000,
-      max_recovery_time_ms: u32 = 30000,
-  };
-  ```
-
-#### 6. **Structured Logging** (Medium Impact)
-- **Status**: 🚧 Ready to implement
-- **Impact**: Professional debugging and audit trails
-- **Goal**: Replace debug prints with leveled, structured logs
-- **Features**: JSON output, log rotation, query performance logging
-
-### 🛡️ **Priority 3: Reliability & Safety**
-
-#### 7. **Write-Ahead Log Improvements** (High Impact)
-- **Status**: 🚧 Planned
-- **Impact**: Prevents data corruption, improves recovery
-- **Goal**: Checksummed, self-healing append log
-- **Features**:
-  - CRC32 checksums for corruption detection
-  - Automatic repair of corrupted entries  
-  - Detailed recovery statistics
-
-#### 8. **Graceful Degradation** (Medium Impact)
-- **Status**: 🚧 Planned
-- **Impact**: Prevents system crashes under load
-- **Goal**: Resource-aware operation with intelligent limits
-- **Features**: Memory monitoring, disk space management, automatic cleanup
-
-### 🔌 **Priority 4: API & Integration**
-
-#### 9. **HTTP REST API** (High Value for Adoption) ✅ **COMPLETED**
-- **Status**: ✅ **PRODUCTION READY** - Full HTTP API implemented
-- **Impact**: Makes ContextDB accessible from any language ✅ **ACHIEVED**
-- **Goal**: Production-ready web API with authentication ✅ **ACHIEVED**
-- **Endpoints**: ✅ **ALL IMPLEMENTED**
-  ```
-  POST   /api/v1/nodes           # Insert nodes
-  GET    /api/v1/nodes/:id/related # Graph traversal
-  POST   /api/v1/vectors/:id/similar # Vector similarity  
-  GET    /api/v1/health          # Health checks
-  GET    /api/v1/metrics         # Prometheus metrics
-  POST   /api/v1/batch           # Batch operations
-  POST   /api/v1/query/hybrid    # Hybrid queries
-  POST   /api/v1/snapshot        # Manual snapshots
-  ```
-
-#### 10. **ContextQL Query Language** (Medium Impact)
-- **Status**: 🚧 Planned
-- **Impact**: Declarative queries, easier integration
-- **Goal**: SQL-like syntax for hybrid graph+vector queries
-- **Example**:
-  ```sql
-  MATCH (user:User)-[:OWNS]->(doc:Document) 
-  VECTOR SIMILAR TO user.embedding LIMIT 10
-  RETURN doc.title, similarity_score
-  ```
-
-### 📊 **Priority 5: Advanced Features**
-
-#### 11. **Real-time Replication** (High Impact for Scale)
-- **Status**: 🚧 Future
-- **Impact**: High availability and horizontal scaling
-- **Goal**: Master-slave replication with consistency guarantees
-- **Features**: Async replication, partition tolerance, failover
-
-#### 12. **Compression & Storage Optimization** (Medium Impact)
-- **Status**: 🚧 Future  
-- **Impact**: Reduced storage costs and faster I/O
-- **Goal**: Intelligent compression based on data patterns
-- **Features**: LZ4 compression, delta encoding, columnar storage
-
-## 🚀 **Implementation Timeline**
-
-### **Phase 1: Production Readiness** (Weeks 1-4)
-- Week 1: HTTP API + Basic monitoring
-- Week 2: Production configuration system  
-- Week 3: Structured logging + Health checks
-- Week 4: Basic error handling improvements
-
-### **Phase 2: Performance Foundation** (Weeks 5-8)  
-- Week 5: HNSW vector indexing implementation
-- Week 6: Memory-mapped persistent indexes
-- Week 7: Batch processing optimization
-- Week 8: Performance benchmarking and tuning
-
-### **Phase 3: Reliability** (Weeks 9-12)
-- Week 9: Write-ahead log improvements (checksums)
-- Week 10: Graceful degradation and resource management
-- Week 11: Advanced monitoring and alerting
-- Week 12: Load testing and stability improvements
-
-### **Phase 4: Advanced Features** (Weeks 13+)
-- Week 13+: ContextQL query language
-- Week 15+: Real-time replication
-- Week 17+: Compression and storage optimization
-
-## 📈 **Success Metrics**
+### Performance Goals
 
 - **Performance**: Support 1M+ vectors with <10ms query latency
 - **Reliability**: 99.9% uptime with automatic recovery
@@ -704,58 +579,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-Built with ❤️ and **Zig** for high-performance hybrid data processing. 
-
-## 🚀 Performance & Scalability Roadmap
-
-### Completed Systems ✅
-
-- **✅ HNSW Vector Indexing** - O(log n) vector search with hierarchical navigable small world graphs
-- **✅ Query Optimization Engine** - Intelligent query planning, cost estimation, and result caching  
-- **✅ Caching System** - High-performance LRU/LFU memory caches with configurable eviction policies
-- **✅ Parallel Processing System** - Multi-threaded work distribution with dynamic load balancing
-- **✅ Memory-Mapped Persistent Indexes** - Instant startup via disk-backed indexes with crash-safe persistence
-- **✅ Distributed Consensus (Raft)** - Multi-node replication with leader election and log consensus
-- **✅ HTTP REST API** - Production-ready web API with comprehensive endpoints for language-agnostic access
-- **✅ Monitoring & Metrics** - Prometheus-compatible metrics with comprehensive observability and health checks
-
-### Next Priority Systems 🎯
-
-- **🔄 Monitoring & Observability** - Prometheus metrics, health checks, and cluster status dashboard
-- **🔄 Advanced Query Language** - SQL-like syntax for complex hybrid graph+vector queries
-- **🔄 Horizontal Sharding** - Automatic data partitioning across multiple nodes  
-- **🔄 Compression Engine** - LZ4/Zstd compression for storage and network efficiency
-
-## 🧪 Testing & Quality Assurance
-
-### Comprehensive Test Suite
-- **✅ 15+ Raft Consensus Tests** - Complete protocol compliance testing
-- **✅ Distributed Operations Tests** - Multi-node cluster behavior verification
-- **✅ Performance Benchmarks** - 7-node cluster performance validation
-- **✅ Crash Recovery Tests** - Persistent state recovery and data integrity
-- **✅ Network Protocol Tests** - Binary serialization and CRC32 validation
-- **✅ HTTP API Tests** - Complete REST API functionality and JSON parsing validation
-
-### Test Commands
-```bash
-# Run all tests
-zig build test-all
-
-# Test specific components
-zig build test-raft          # Distributed consensus tests
-zig build test               # Core database tests
-zig build test-http-api      # HTTP REST API tests
-
-# Run distributed demo
-zig build demo-distributed   # Interactive cluster demonstration
-
-# Run HTTP server
-zig build http-server        # Start HTTP API server
-zig build http-client-demo   # Show API usage examples
-```
-
-### Performance Validation
-- **Cluster Performance**: Sub-millisecond consensus on 7-node clusters
-- **Network Efficiency**: 30μs for 3000 node lookups
-- **Message Integrity**: 100% success rate with CRC32 checksums
-- **Leadership Election**: 150-300ms randomized timeouts for fault tolerance 
+Built with ❤️ and **Zig** for high-performance hybrid data processing.
