@@ -166,6 +166,58 @@ zig build run
 zig build test
 ```
 
+## ⚙️ Configuration
+
+ContextDB features a **comprehensive configuration system** that allows fine-tuning of all components for production deployment. The configuration uses a simple key=value format and supports:
+
+- **🏗️ Core Database**: Data paths, persistence, logging
+- **💾 Caching System**: LRU/LFU policies, memory limits, eviction thresholds  
+- **🌐 HTTP API**: Server settings, timeouts, CORS, rate limiting
+- **🔍 Vector Search**: HNSW parameters, similarity thresholds, clustering
+- **📊 Graph Traversal**: BFS/DFS limits, caching, performance tuning
+- **📈 Monitoring**: Metrics collection, health checks, observability
+- **💽 Persistent Indexes**: Memory mapping, sync intervals, validation
+- **📸 Snapshot System**: Auto-snapshots, compression, cleanup policies
+- **☁️ S3 Integration**: Cloud storage, timeouts, verification
+- **🔗 Raft Consensus**: Distributed timing, network settings, reliability
+- **🏭 Cluster Management**: Replication, quorum, failure detection
+
+### Quick Configuration Setup
+
+```bash
+# Copy the example configuration
+cp contextdb.conf.example contextdb.conf
+
+# Edit the configuration for your environment
+nano contextdb.conf
+
+# Start ContextDB with your configuration
+zig build run
+```
+
+### Production Configuration Examples
+
+```ini
+# High-performance setup
+cache_initial_capacity = 10000
+persistent_index_sync_interval = 50
+vector_dimensions = 512
+hnsw_ef_construction = 400
+
+# Distributed cluster setup  
+raft_enable = true
+raft_node_id = 1
+cluster_replication_factor = 3
+cluster_read_quorum = 2
+
+# Cloud deployment
+s3_enable = true
+s3_bucket = my-production-bucket
+s3_region = us-west-2
+```
+
+**📖 For complete configuration documentation, see [CONFIGURATION.md](CONFIGURATION.md)**
+
 ### Basic Usage
 
 ```zig
@@ -525,11 +577,11 @@ test/
 - **✅ Distributed Consensus (Raft)** - Multi-node replication with leader election and log consensus
 - **✅ HTTP REST API** - Production-ready web API with comprehensive endpoints for language-agnostic access
 - **✅ Monitoring & Metrics** - Prometheus-compatible metrics with comprehensive observability and health checks
+- **✅ Advanced Configuration System** - Comprehensive file-based configuration with 70+ parameters for production tuning
 
 ### Next Priority Systems 🎯
 
 #### **Priority 1: Production Operations**
-- **🔄 Advanced Configuration System** - Environment-based and file-based configuration for production tuning
 - **🔄 Structured Logging** - Professional debugging and audit trails with JSON output and log rotation
 - **🔄 Graceful Degradation** - Resource-aware operation with intelligent limits and automatic cleanup
 
@@ -539,7 +591,7 @@ test/
 - **🔄 Horizontal Sharding** - Automatic data partitioning across multiple nodes for massive scale
 
 #### **Priority 3: Advanced Features**
-- **🔄 Real-time Replication** - Master-slave replication with consistency guarantees and failover
+- **🔄 Real-time Replication** - Writer-reader replication with consistency guarantees and failover
 - **🔄 Compression Engine** - LZ4/Zstd compression for storage and network efficiency
 - **🔄 Advanced Analytics** - Built-in graph algorithms (PageRank, community detection, centrality measures)
 
