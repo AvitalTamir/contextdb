@@ -15,12 +15,22 @@ const FuzzOptions = struct {
     save_dir: []const u8 = "fuzz_results",
     mode: FuzzMode = .single_node,
     
+    // Memory management for allocated strings
+    allocator: ?std.mem.Allocator = null,
+    save_dir_allocated: bool = false,
+    
     const FuzzMode = enum {
         single_node,
         distributed,
         stress,
         regression,
     };
+    
+    pub fn deinit(self: *FuzzOptions) void {
+        if (self.save_dir_allocated and self.allocator != null) {
+            self.allocator.?.free(self.save_dir);
+        }
+    }
 };
 
 fn printUsage(program_name: []const u8) void {
@@ -48,7 +58,9 @@ fn printUsage(program_name: []const u8) void {
 }
 
 fn parseArgs(allocator: std.mem.Allocator, args: [][:0]u8) !FuzzOptions {
-    var options = FuzzOptions{};
+    var options = FuzzOptions{
+        .allocator = allocator,
+    };
     
     var i: usize = 1; // Skip program name
     while (i < args.len) : (i += 1) {
@@ -76,6 +88,7 @@ fn parseArgs(allocator: std.mem.Allocator, args: [][:0]u8) !FuzzOptions {
             i += 1;
             if (i >= args.len) return error.MissingValue;
             options.save_dir = try allocator.dupe(u8, args[i]);
+            options.save_dir_allocated = true;
         } else if (std.mem.eql(u8, arg, "--mode")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
@@ -310,7 +323,7 @@ pub fn main() !void {
         return;
     }
     
-    const options = parseArgs(allocator, args) catch |err| {
+    var options = parseArgs(allocator, args) catch |err| {
         switch (err) {
             error.ShowHelp => {
                 printUsage(args[0]);
@@ -331,6 +344,7 @@ pub fn main() !void {
             else => return err,
         }
     };
+    defer options.deinit(); // Clean up allocated memory
     
     // Create save directory if needed
     if (options.save_failures) {
