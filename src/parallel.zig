@@ -103,6 +103,9 @@ const Worker = struct {
                     const end_time = std.time.nanoTimestamp();
                     const worker_time = @as(u64, @intCast(end_time - start_time));
                     _ = self.pool.stats.total_worker_time_ns.fetchAdd(worker_time, .seq_cst);
+                    
+                    // Decrement pending tasks (failure case)
+                    _ = self.pool.stats.pending_tasks.fetchSub(1, .seq_cst);
                     continue;
                 };
                 
@@ -114,8 +117,9 @@ const Worker = struct {
                 _ = self.pool.stats.total_execution_time_ns.fetchAdd(execution_time, .seq_cst);
                 _ = self.pool.stats.total_worker_time_ns.fetchAdd(execution_time, .seq_cst);
                 
-                // Decrement active workers
+                // Decrement active workers and pending tasks (success case)
                 _ = self.pool.stats.active_workers.fetchSub(1, .seq_cst);
+                _ = self.pool.stats.pending_tasks.fetchSub(1, .seq_cst);
             } else {
                 // No work available, sleep briefly to avoid busy waiting
                 std.time.sleep(1_000_000); // 1ms
@@ -240,6 +244,9 @@ pub const ThreadPoolStats = struct {
     total_worker_time_ns: std.atomic.Value(u64),
     peak_active_workers: std.atomic.Value(u32),
     
+    // Fix race condition: track submitted but not completed tasks
+    pending_tasks: std.atomic.Value(u64),
+    
     pub fn init() ThreadPoolStats {
         return ThreadPoolStats{
             .tasks_completed = std.atomic.Value(u64).init(0),
@@ -249,6 +256,7 @@ pub const ThreadPoolStats = struct {
             .queue_size = std.atomic.Value(u32).init(0),
             .total_worker_time_ns = std.atomic.Value(u64).init(0),
             .peak_active_workers = std.atomic.Value(u32).init(0),
+            .pending_tasks = std.atomic.Value(u64).init(0),
         };
     }
     
@@ -380,6 +388,9 @@ pub const ThreadPool = struct {
     pub fn submit(self: *ThreadPool, work_item: WorkItem) !void {
         if (!self.running.load(.seq_cst)) return error.ThreadPoolNotRunning;
         
+        // Increment pending tasks before enqueuing
+        _ = self.stats.pending_tasks.fetchAdd(1, .seq_cst);
+        
         try self.work_queue.enqueue(work_item);
         self.stats.queue_size.store(@intCast(self.work_queue.size()), .seq_cst);
     }
@@ -392,11 +403,9 @@ pub const ThreadPool = struct {
         const start_time = std.time.milliTimestamp();
         
         while (true) {
-            // Check if both queue is empty AND no workers are active
-            const queue_empty = self.work_queue.size() == 0;
-            const workers_idle = self.stats.active_workers.load(.seq_cst) == 0;
-            
-            if (queue_empty and workers_idle) {
+            // Check if all submitted tasks are completed
+            // This fixes the race condition by tracking submitted vs completed work
+            if (self.stats.pending_tasks.load(.seq_cst) == 0) {
                 return true;
             }
             
