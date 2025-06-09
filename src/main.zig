@@ -17,6 +17,7 @@ pub const distributed_contextdb = @import("distributed_contextdb.zig");
 pub const http_api = @import("http_api.zig");
 pub const monitoring = @import("monitoring.zig");
 pub const config_mod = @import("config.zig");
+pub const fuzzing = @import("fuzzing.zig");
 
 // Local aliases for internal use
 const types_local = types;
@@ -283,53 +284,66 @@ pub const ContextDB = struct {
     pub fn queryHybrid(self: *ContextDB, start_node_id: u64, depth: u8, top_k: u32) !HybridQueryResult {
         const start_time = std.time.nanoTimestamp();
         
-        const result = blk: {
-            // First, find related nodes
-            const related_nodes = try self.queryRelated(start_node_id, depth);
-            defer related_nodes.deinit();
-
-            var similar_vectors = std.ArrayList(types.SimilarityResult).init(self.allocator);
-            var node_vector_map = std.AutoHashMap(u64, u64).init(self.allocator);
-            defer node_vector_map.deinit();
-
-            // Find vectors for each related node (assuming node_id == vector_id for simplicity)
-            for (related_nodes.items) |node| {
-                if (self.vector_index.getVector(node.id)) |_| {
-                    const node_similar = try self.vector_search.querySimilar(&self.vector_index, node.id, top_k);
-                    defer node_similar.deinit();
-                    
-                    try similar_vectors.appendSlice(node_similar.items);
-                    try node_vector_map.put(node.id, node.id);
-                }
-            }
-
-            // Sort by similarity (descending)
-            std.mem.sort(types.SimilarityResult, similar_vectors.items, {}, compareByDescendingSimilarity);
-
-            // Limit results to top_k
-            if (similar_vectors.items.len > top_k) {
-                similar_vectors.shrinkRetainingCapacity(top_k);
-            }
-
-            // Clone the related nodes to return
-            var cloned_related_nodes = std.ArrayList(types.Node).init(self.allocator);
-            try cloned_related_nodes.appendSlice(related_nodes.items);
-
-            // Clone the node_vector_map to return
-            var cloned_node_vector_map = std.AutoHashMap(u64, u64).init(self.allocator);
-            var map_iter = node_vector_map.iterator();
-            while (map_iter.next()) |entry| {
-                try cloned_node_vector_map.put(entry.key_ptr.*, entry.value_ptr.*);
-            }
-
-            break :blk HybridQueryResult{
-                .related_nodes = cloned_related_nodes,
-                .similar_vectors = similar_vectors,
-                .node_vector_map = cloned_node_vector_map,
-            };
-        } catch |err| {
+        // First, find related nodes
+        const related_nodes = self.queryRelated(start_node_id, depth) catch |err| {
             self.metrics.recordQueryError();
             return err;
+        };
+        defer related_nodes.deinit();
+
+        var similar_vectors = std.ArrayList(types.SimilarityResult).init(self.allocator);
+        var node_vector_map = std.AutoHashMap(u64, u64).init(self.allocator);
+        defer node_vector_map.deinit();
+
+        // Find vectors for each related node (assuming node_id == vector_id for simplicity)
+        for (related_nodes.items) |node| {
+            if (self.vector_index.getVector(node.id)) |_| {
+                const node_similar = self.vector_search.querySimilar(&self.vector_index, node.id, top_k) catch |err| {
+                    self.metrics.recordQueryError();
+                    return err;
+                };
+                defer node_similar.deinit();
+                
+                similar_vectors.appendSlice(node_similar.items) catch |err| {
+                    self.metrics.recordQueryError();
+                    return err;
+                };
+                node_vector_map.put(node.id, node.id) catch |err| {
+                    self.metrics.recordQueryError();
+                    return err;
+                };
+            }
+        }
+
+        // Sort by similarity (descending)
+        std.mem.sort(types.SimilarityResult, similar_vectors.items, {}, compareByDescendingSimilarity);
+
+        // Limit results to top_k
+        if (similar_vectors.items.len > top_k) {
+            similar_vectors.shrinkRetainingCapacity(top_k);
+        }
+
+        // Clone the related nodes to return
+        var cloned_related_nodes = std.ArrayList(types.Node).init(self.allocator);
+        cloned_related_nodes.appendSlice(related_nodes.items) catch |err| {
+            self.metrics.recordQueryError();
+            return err;
+        };
+
+        // Clone the node_vector_map to return
+        var cloned_node_vector_map = std.AutoHashMap(u64, u64).init(self.allocator);
+        var map_iter = node_vector_map.iterator();
+        while (map_iter.next()) |entry| {
+            cloned_node_vector_map.put(entry.key_ptr.*, entry.value_ptr.*) catch |err| {
+                self.metrics.recordQueryError();
+                return err;
+            };
+        }
+
+        const result = HybridQueryResult{
+            .related_nodes = cloned_related_nodes,
+            .similar_vectors = similar_vectors,
+            .node_vector_map = cloned_node_vector_map,
         };
         
         // Record metrics

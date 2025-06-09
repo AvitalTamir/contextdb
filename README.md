@@ -488,6 +488,32 @@ std.debug.print("Deleted {} local, {} S3 snapshots\n",
 - **✅ Network Protocol Tests** - Binary serialization and CRC32 validation
 - **✅ HTTP API Tests** - Complete REST API functionality and JSON parsing validation
 
+### 🔥 TigerBeetle-Inspired Fuzzing Framework
+
+ContextDB includes a **comprehensive fuzzing framework** for finding edge cases through randomized testing:
+
+- **Deterministic Testing**: Reproducible test cases using finite entropy
+- **Continuous Fuzzing**: Multiple modes (single-node, distributed, stress, regression)
+- **Structured Operation Generation**: Generate complex database operations from entropy
+- **Distributed Consensus Testing**: Raft protocol validation with network simulation
+- **Automatic Failure Analysis**: Save and analyze failure cases for debugging
+
+```bash
+# Quick fuzzing for daily development (2 minutes)
+zig build fuzz-quick
+
+# Comprehensive fuzzing campaigns
+zig build fuzz -- --iterations 5000 --mode stress --timeout 60
+
+# Distributed Raft consensus testing
+zig build fuzz-distributed
+
+# Regression testing for stability
+zig build fuzz-regression
+```
+
+**📖 For complete fuzzing documentation, see [FUZZING.md](FUZZING.md)**
+
 ### Test Commands
 ```bash
 # Run all tests
@@ -497,6 +523,11 @@ zig build test-all
 zig build test-raft          # Distributed consensus tests
 zig build test               # Core database tests
 zig build test-http-api      # HTTP REST API tests
+
+# Fuzzing campaigns
+zig build test-fuzzing       # Fuzzing framework tests
+zig build fuzz-quick         # Quick fuzzing (50 iterations)
+zig build fuzz-stress        # Stress testing with large datasets
 
 # Run distributed demo
 zig build demo-distributed   # Interactive cluster demonstration
@@ -554,7 +585,8 @@ src/
 ├── persistent_index.zig        # Memory-mapped disk indexes (21KB, 582 lines)
 └── query_optimizer.zig         # Query planning and optimization (18KB, 474 lines)
 test/
-└── test_*.zig              # Comprehensive tests
+├── test_*.zig                  # Comprehensive tests
+└── fuzzing.zig                 # TigerBeetle-inspired fuzzing framework
 ```
 
 ### Design Principles
@@ -564,6 +596,18 @@ test/
 3. **Robustness**: Graceful error handling and recovery
 4. **Performance**: Fast paths avoid allocations
 5. **Modularity**: Components can be tested in isolation
+
+### Quality Assurance
+
+ContextDB follows rigorous testing practices inspired by TigerBeetle:
+
+- **Deterministic Testing**: All tests produce reproducible results
+- **Comprehensive Coverage**: Unit, integration, and performance tests
+- **Fuzzing Framework**: Randomized testing for edge case discovery
+- **Continuous Integration**: Automated testing on every commit
+- **Performance Regression Detection**: Benchmark-based quality gates
+
+**📖 For detailed fuzzing and testing documentation, see [FUZZING.md](FUZZING.md)**
 
 ## 🚀 Development Roadmap
 

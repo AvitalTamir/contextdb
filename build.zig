@@ -162,6 +162,95 @@ pub fn build(b: *std.Build) void {
     const test_http_api_run = b.addRunArtifact(test_http_api_exe);
     test_http_api_step.dependOn(&test_http_api_run.step);
 
+    // Fuzzing framework tests
+    const test_fuzzing_step = b.step("test-fuzzing", "Run fuzzing framework tests");
+    const test_fuzzing_exe = b.addTest(.{
+        .root_source_file = b.path("test/test_fuzzing.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_fuzzing_exe.root_module.addImport("contextdb", contextdb_module);
+    const test_fuzzing_run = b.addRunArtifact(test_fuzzing_exe);
+    test_fuzzing_step.dependOn(&test_fuzzing_run.step);
+
+    // Distributed fuzzing tests
+    const test_distributed_fuzzing_step = b.step("test-distributed-fuzzing", "Run distributed fuzzing tests");
+    const test_distributed_fuzzing_exe = b.addTest(.{
+        .root_source_file = b.path("test/test_distributed_fuzzing.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_distributed_fuzzing_exe.root_module.addImport("contextdb", contextdb_module);
+    const test_distributed_fuzzing_run = b.addRunArtifact(test_distributed_fuzzing_exe);
+    test_distributed_fuzzing_step.dependOn(&test_distributed_fuzzing_run.step);
+
+    // Fuzzing campaign runner
+    const fuzz_runner_step = b.step("fuzz", "Run ContextDB fuzzing campaigns");
+    const fuzz_runner_exe = b.addExecutable(.{
+        .name = "fuzz_runner",
+        .root_source_file = b.path("examples/fuzz_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_runner_exe.root_module.addImport("contextdb", contextdb_module);
+    const fuzz_runner_run = b.addRunArtifact(fuzz_runner_exe);
+    if (b.args) |args| {
+        fuzz_runner_run.addArgs(args);
+    }
+    fuzz_runner_step.dependOn(&fuzz_runner_run.step);
+
+    // Quick fuzzing tests (for CI/development)
+    const fuzz_quick_step = b.step("fuzz-quick", "Run quick fuzzing tests");
+    const fuzz_quick_exe = b.addExecutable(.{
+        .name = "fuzz_quick",
+        .root_source_file = b.path("examples/fuzz_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_quick_exe.root_module.addImport("contextdb", contextdb_module);
+    const fuzz_quick_run = b.addRunArtifact(fuzz_quick_exe);
+    fuzz_quick_run.addArgs(&[_][]const u8{ "--iterations", "50", "--timeout", "5", "--save-dir", "quick_fuzz" });
+    fuzz_quick_step.dependOn(&fuzz_quick_run.step);
+
+    // Regression fuzzing tests
+    const fuzz_regression_step = b.step("fuzz-regression", "Run regression fuzzing tests");
+    const fuzz_regression_exe = b.addExecutable(.{
+        .name = "fuzz_regression",
+        .root_source_file = b.path("examples/fuzz_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_regression_exe.root_module.addImport("contextdb", contextdb_module);
+    const fuzz_regression_run = b.addRunArtifact(fuzz_regression_exe);
+    fuzz_regression_run.addArgs(&[_][]const u8{ "--mode", "regression", "--save-dir", "regression_results" });
+    fuzz_regression_step.dependOn(&fuzz_regression_run.step);
+
+    // Distributed fuzzing campaigns
+    const fuzz_distributed_step = b.step("fuzz-distributed", "Run distributed fuzzing campaigns");
+    const fuzz_distributed_exe = b.addExecutable(.{
+        .name = "fuzz_distributed",
+        .root_source_file = b.path("examples/fuzz_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_distributed_exe.root_module.addImport("contextdb", contextdb_module);
+    const fuzz_distributed_run = b.addRunArtifact(fuzz_distributed_exe);
+    fuzz_distributed_run.addArgs(&[_][]const u8{ "--mode", "distributed", "--timeout", "60" });
+    fuzz_distributed_step.dependOn(&fuzz_distributed_run.step);
+
+    // Stress testing campaigns
+    const fuzz_stress_step = b.step("fuzz-stress", "Run stress testing campaigns");
+    const fuzz_stress_exe = b.addExecutable(.{
+        .name = "fuzz_stress",
+        .root_source_file = b.path("examples/fuzz_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_stress_exe.root_module.addImport("contextdb", contextdb_module);
+    const fuzz_stress_run = b.addRunArtifact(fuzz_stress_exe);
+    fuzz_stress_run.addArgs(&[_][]const u8{ "--mode", "stress", "--iterations", "500", "--timeout", "60" });
+    fuzz_stress_step.dependOn(&fuzz_stress_run.step);
+
     const test_all_step = b.step("test-all", "Run all tests");
     test_all_step.dependOn(&run_unit_tests.step);
     test_all_step.dependOn(&run_hnsw_basic_tests.step);
@@ -172,6 +261,13 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_monitoring_tests.step);
     test_all_step.dependOn(&test_raft_run.step);
     test_all_step.dependOn(&test_http_api_run.step);
+    test_all_step.dependOn(&test_fuzzing_run.step);
+
+    // Comprehensive test suite including fuzzing
+    const test_comprehensive_step = b.step("test-comprehensive", "Run all tests including fuzzing");
+    test_comprehensive_step.dependOn(test_all_step);
+    test_comprehensive_step.dependOn(&test_distributed_fuzzing_run.step);
+    test_comprehensive_step.dependOn(&fuzz_quick_run.step);
 
     // Add distributed demo
     const distributed_demo_step = b.step("demo-distributed", "Run distributed ContextDB demo");
