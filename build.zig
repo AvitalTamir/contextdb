@@ -98,6 +98,16 @@ pub fn build(b: *std.Build) void {
     // Add the ContextDB module as a dependency for the persistent index tests
     persistent_index_tests.root_module.addImport("contextdb", contextdb_module);
 
+    // Monitoring tests
+    const monitoring_tests = b.addTest(.{
+        .root_source_file = b.path("test/test_monitoring.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Add the ContextDB module as a dependency for the monitoring tests
+    monitoring_tests.root_module.addImport("contextdb", contextdb_module);
+
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const run_hnsw_tests = b.addRunArtifact(hnsw_tests);
     const run_hnsw_basic_tests = b.addRunArtifact(hnsw_basic_tests);
@@ -105,6 +115,7 @@ pub fn build(b: *std.Build) void {
     const run_cache_tests = b.addRunArtifact(cache_tests);
     const run_parallel_tests = b.addRunArtifact(parallel_tests);
     const run_persistent_index_tests = b.addRunArtifact(persistent_index_tests);
+    const run_monitoring_tests = b.addRunArtifact(monitoring_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
@@ -126,6 +137,9 @@ pub fn build(b: *std.Build) void {
     
     const test_persistent_index_step = b.step("test-persistent-index", "Run persistent index tests");
     test_persistent_index_step.dependOn(&run_persistent_index_tests.step);
+    
+    const test_monitoring_step = b.step("test-monitoring", "Run monitoring tests");
+    test_monitoring_step.dependOn(&run_monitoring_tests.step);
     
     const test_raft_step = b.step("test-raft", "Run Raft consensus tests");
     const test_raft_exe = b.addTest(.{
@@ -155,6 +169,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_cache_tests.step);
     test_all_step.dependOn(&run_parallel_tests.step);
     test_all_step.dependOn(&run_persistent_index_tests.step);
+    test_all_step.dependOn(&run_monitoring_tests.step);
     test_all_step.dependOn(&test_raft_run.step);
     test_all_step.dependOn(&test_http_api_run.step);
 

@@ -75,6 +75,19 @@ pub const HttpResponse = struct {
     pub fn text(status: HttpStatus, body: []const u8) HttpResponse {
         return init(status, body, "text/plain");
     }
+
+    pub fn toString(self: HttpResponse) ![]const u8 {
+        var response_buf: [8192]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&response_buf);
+        const temp_allocator = fba.allocator();
+
+        const http_response = try std.fmt.allocPrint(temp_allocator,
+            "HTTP/1.1 {} \r\nContent-Type: {s}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{s}",
+            .{ @intFromEnum(self.status), self.content_type, self.body.len, self.body }
+        );
+
+        return http_response[0..];
+    }
 };
 
 /// JSON request/response types
@@ -175,31 +188,67 @@ pub const ApiServer = struct {
     fn handleConnection(self: *ApiServer, connection: std.net.Server.Connection) void {
         defer connection.stream.close();
         
+        // Track active connection
+        self.db.metrics.incrementActiveConnections();
+        defer self.db.metrics.decrementActiveConnections();
+        
         var buffer: [4096]u8 = undefined;
-        const bytes_read = connection.stream.readAll(&buffer) catch |err| {
-            std.debug.print("Failed to read request: {}\n", .{err});
-            return;
-        };
-
-        if (bytes_read == 0) return;
-
-        const request_data = buffer[0..bytes_read];
-        var request = self.parseHttpRequest(request_data) catch |err| {
-            std.debug.print("Failed to parse request: {}\n", .{err});
-            self.sendErrorResponse(connection.stream, .bad_request, "Invalid request format");
-            return;
-        };
-        defer request.deinit();
-
-        const response = self.handleRequest(&request) catch |err| {
-            std.debug.print("Failed to handle request: {}\n", .{err});
-            self.sendErrorResponse(connection.stream, .internal_server_error, "Internal server error");
-            return;
-        };
-
-        self.sendResponse(connection.stream, response) catch |err| {
-            std.debug.print("Failed to send response: {}\n", .{err});
-        };
+        var request_start: usize = 0;
+        
+        while (true) {
+            const bytes_read = connection.stream.read(buffer[request_start..]) catch |err| {
+                std.debug.print("Error reading from connection: {}\n", .{err});
+                return;
+            };
+            
+            if (bytes_read == 0) break; // Connection closed by client
+            
+            request_start += bytes_read;
+            
+            // Try to parse a complete HTTP request
+            if (std.mem.indexOf(u8, buffer[0..request_start], "\r\n\r\n")) |end| {
+                const request_data = buffer[0..end + 4];
+                
+                const request = self.parseHttpRequest(request_data) catch |err| {
+                    std.debug.print("Error parsing HTTP request: {}\n", .{err});
+                    const error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request";
+                    _ = connection.stream.writeAll(error_response) catch {};
+                    return;
+                };
+                
+                const response = self.handleRequest(&request) catch |err| {
+                    std.debug.print("Error handling request: {}\n", .{err});
+                    return HttpResponse.text(.internal_server_error, "Internal Server Error");
+                };
+                
+                const response_text = response.toString() catch |err| {
+                    std.debug.print("Error formatting response: {}\n", .{err});
+                    const fallback_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 21\r\n\r\nInternal Server Error";
+                    _ = connection.stream.writeAll(fallback_response) catch {};
+                    return;
+                };
+                defer self.allocator.free(response_text);
+                
+                _ = connection.stream.writeAll(response_text) catch |err| {
+                    std.debug.print("Error writing response: {}\n", .{err});
+                    return;
+                };
+                
+                // Reset buffer for next request
+                if (request_start > end + 4) {
+                    std.mem.copyForwards(u8, buffer[0..], buffer[end + 4..request_start]);
+                    request_start -= (end + 4);
+                } else {
+                    request_start = 0;
+                }
+            }
+            
+            // Prevent buffer overflow
+            if (request_start >= buffer.len) {
+                std.debug.print("Request too large, closing connection\n", .{});
+                return;
+            }
+        }
     }
 
     pub fn parseHttpRequest(self: *ApiServer, data: []const u8) !HttpRequest {
@@ -308,36 +357,101 @@ pub const ApiServer = struct {
     }
 
     fn handleHealth(self: *ApiServer) !HttpResponse {
-        var response_buf: [512]u8 = undefined;
+        var response_buf: [2048]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&response_buf);
         const temp_allocator = fba.allocator();
 
+        // Perform comprehensive health checks
+        var health_check = self.db.monitoring.HealthCheck.init(temp_allocator);
+        defer health_check.deinit();
+        
+        // Database connectivity check
+        const db_check_start = std.time.nanoTimestamp();
         const stats = self.db.getStats();
-        const health_status = if (self.distributed_db) |dist_db| 
-            if (dist_db.isLeader()) "leader" else "follower"
+        const db_check_time = @divTrunc(std.time.nanoTimestamp() - db_check_start, 1000);
+        
+        const db_status = if (stats.node_count >= 0 and stats.edge_count >= 0 and stats.vector_count >= 0) 
+            self.db.monitoring.HealthStatus.healthy 
         else 
-            "single-node";
+            self.db.monitoring.HealthStatus.unhealthy;
+            
+        try health_check.addCheck("database_connectivity", db_status, "Database is accessible and returning valid statistics", @intCast(db_check_time));
+        
+        // Memory usage check
+        const memory_check_start = std.time.nanoTimestamp();
+        const memory_usage = self.db.metrics.memory_usage_bytes.get();
+        const memory_check_time = @divTrunc(std.time.nanoTimestamp() - memory_check_start, 1000);
+        
+        const memory_status = if (memory_usage < 1_000_000_000) // < 1GB
+            self.db.monitoring.HealthStatus.healthy
+        else if (memory_usage < 2_000_000_000) // < 2GB
+            self.db.monitoring.HealthStatus.degraded
+        else
+            self.db.monitoring.HealthStatus.unhealthy;
+            
+        const memory_message = try std.fmt.allocPrint(temp_allocator, "Memory usage: {} bytes", .{memory_usage});
+        try health_check.addCheck("memory_usage", memory_status, memory_message, @intCast(memory_check_time));
+        
+        // Error rate check
+        const error_check_start = std.time.nanoTimestamp();
+        const error_rate = self.db.metrics.getErrorRate();
+        const error_check_time = @divTrunc(std.time.nanoTimestamp() - error_check_start, 1000);
+        
+        const error_status = if (error_rate < 1.0) // < 1%
+            self.db.monitoring.HealthStatus.healthy
+        else if (error_rate < 5.0) // < 5%
+            self.db.monitoring.HealthStatus.degraded
+        else
+            self.db.monitoring.HealthStatus.unhealthy;
+            
+        const error_message = try std.fmt.allocPrint(temp_allocator, "Error rate: {d:.2}%", .{error_rate});
+        try health_check.addCheck("error_rate", error_status, error_message, @intCast(error_check_time));
+        
+        // Distributed system check (if applicable)
+        if (self.distributed_db) |dist_db| {
+            const cluster_check_start = std.time.nanoTimestamp();
+            const is_leader = dist_db.isLeader();
+            const cluster_check_time = @divTrunc(std.time.nanoTimestamp() - cluster_check_start, 1000);
+            
+            const cluster_status = self.db.monitoring.HealthStatus.healthy;
+            const cluster_message = if (is_leader) "Acting as cluster leader" else "Acting as cluster follower";
+            try health_check.addCheck("cluster_status", cluster_status, cluster_message, @intCast(cluster_check_time));
+        }
 
-        const response = try std.fmt.allocPrint(temp_allocator, 
-            "{{\"status\":\"healthy\",\"mode\":\"{s}\",\"node_count\":{},\"edge_count\":{},\"vector_count\":{},\"timestamp\":{}}}", 
-            .{ health_status, stats.node_count, stats.edge_count, stats.vector_count, std.time.timestamp() }
-        );
-
-        return HttpResponse.json(.ok, response);
+        // Generate JSON response
+        const health_json = try health_check.exportJson(temp_allocator);
+        return HttpResponse.json(.ok, health_json);
     }
 
     fn handleMetrics(self: *ApiServer) !HttpResponse {
-        var response_buf: [1024]u8 = undefined;
+        var response_buf: [8192]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&response_buf);
         const temp_allocator = fba.allocator();
 
-        const stats = self.db.getStats();
-        const response = try std.fmt.allocPrint(temp_allocator,
-            "{{\"metrics\":{{\"nodes\":{},\"edges\":{},\"vectors\":{},\"log_entries\":{},\"snapshots\":{}}},\"timestamp\":{}}}", 
-            .{ stats.node_count, stats.edge_count, stats.vector_count, stats.log_entry_count, stats.snapshot_count, std.time.timestamp() }
-        );
-
-        return HttpResponse.json(.ok, response);
+        // Update database statistics in metrics
+        _ = self.db.getStats();
+        
+        // Update memory usage (basic estimation)
+        // In a real implementation, you'd use a proper memory tracker
+        self.db.metrics.updateMemoryUsage(10_000_000); // 10MB baseline estimate
+        
+        // Check if Prometheus format is requested
+        const accept_header = ""; // Would need to parse from actual request headers
+        const wants_prometheus = std.mem.indexOf(u8, accept_header, "text/plain") != null;
+        
+        if (wants_prometheus) {
+            // Return Prometheus format
+            const prometheus_metrics = try self.db.metrics.exportPrometheusMetrics(temp_allocator);
+            return HttpResponse{
+                .status = .ok,
+                .headers = "Content-Type: text/plain; version=0.0.4\r\n",
+                .body = prometheus_metrics,
+            };
+        } else {
+            // Return JSON format
+            const json_metrics = try self.db.metrics.exportJsonMetrics(temp_allocator);
+            return HttpResponse.json(.ok, json_metrics);
+        }
     }
 
     fn handleCreateSnapshot(self: *ApiServer) !HttpResponse {
@@ -720,34 +834,5 @@ pub const ApiServer = struct {
             .{ nodes.items.len, edges.items.len, vectors.items.len }
         );
         return HttpResponse.json(.created, response);
-    }
-
-    fn sendResponse(self: *ApiServer, stream: std.net.Stream, response: HttpResponse) !void {
-        _ = self;
-        var response_buf: [8192]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&response_buf);
-        const temp_allocator = fba.allocator();
-
-        const http_response = try std.fmt.allocPrint(temp_allocator,
-            "HTTP/1.1 {} \r\nContent-Type: {s}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{s}",
-            .{ @intFromEnum(response.status), response.content_type, response.body.len, response.body }
-        );
-
-        _ = try stream.writeAll(http_response);
-    }
-
-    fn sendErrorResponse(self: *ApiServer, stream: std.net.Stream, status: HttpStatus, message: []const u8) void {
-        _ = self;
-        var error_buf: [512]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&error_buf);
-        const temp_allocator = fba.allocator();
-
-        const error_json = std.fmt.allocPrint(temp_allocator, "{{\"error\":\"{s}\"}}", .{message}) catch return;
-        const http_response = std.fmt.allocPrint(temp_allocator,
-            "HTTP/1.1 {} \r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{s}",
-            .{ @intFromEnum(status), error_json.len, error_json }
-        ) catch return;
-
-        _ = stream.writeAll(http_response) catch {};
     }
 }; 

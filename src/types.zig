@@ -209,6 +209,31 @@ pub const SnapshotMetadata = struct {
     }
 };
 
+/// Database statistics for monitoring
+pub const DatabaseStats = struct {
+    node_count: u64,
+    edge_count: u64,
+    vector_count: u64,
+    log_entry_count: u64,
+    snapshot_count: u64,
+    memory_usage: u64,
+    disk_usage: u64,
+    uptime_seconds: u64,
+    
+    pub fn init() DatabaseStats {
+        return DatabaseStats{
+            .node_count = 0,
+            .edge_count = 0,
+            .vector_count = 0,
+            .log_entry_count = 0,
+            .snapshot_count = 0,
+            .memory_usage = 0,
+            .disk_usage = 0,
+            .uptime_seconds = 0,
+        };
+    }
+};
+
 test "Node creation and label handling" {
     const node = Node.init(1, "TestNode");
     try std.testing.expect(node.id == 1);

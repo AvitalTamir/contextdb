@@ -1,0 +1,287 @@
+# ContextDB Development Rules
+# TigerBeetle-inspired high-performance database development in Zig
+
+## 🎯 Core Design Philosophy
+
+### TigerBeetle-Inspired Principles
+- **Deterministic Behavior**: Same input always produces same output - essential for testing and debugging
+- **Zero Dynamic Allocation**: Avoid allocations in hot paths - use fixed buffers and memory pools
+- **Single-Threaded Core**: No locks, no race conditions in the main database engine
+- **Append-Only Architecture**: Immutable logs and snapshots for crash safety and time-travel
+- **Sequential I/O**: Optimize for disk/SSD sequential access patterns
+- **Memory-Mapped I/O**: Let the OS handle caching and persistence efficiently
+
+### ContextDB Architecture Principles
+- **Hybrid Design**: Seamlessly combine graph traversal and vector similarity search
+- **Distributed Consensus**: Use Raft protocol for strong consistency across nodes
+- **Iceberg-Style Storage**: Immutable snapshots with metadata for time-travel queries
+- **HNSW Vector Indexing**: O(log n) vector search with hierarchical navigable small world
+- **HTTP-First API**: Language-agnostic access via REST endpoints
+- **Production-Ready**: Built for real-world performance and reliability
+
+## 🔧 Zig Best Practices
+
+### Code Style
+- Use `snake_case` for functions and variables
+- Use `PascalCase` for types and structs
+- Use `SCREAMING_SNAKE_CASE` for constants
+- Prefer explicit over implicit - be clear about intentions
+- Use `const` wherever possible to prevent accidental mutations
+
+### Memory Management
+```zig
+// ✅ GOOD: Use proper allocator patterns
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+defer _ = gpa.deinit();
+const allocator = gpa.allocator();
+
+// ✅ GOOD: Always defer cleanup
+var list = std.ArrayList(T).init(allocator);
+defer list.deinit();
+
+// ✅ GOOD: Use testing allocator in tests
+const allocator = std.testing.allocator;
+```
+
+### Error Handling
+```zig
+// ✅ GOOD: Explicit error handling
+const result = risky_operation() catch |err| {
+    std.debug.print("Operation failed: {}\n", .{err});
+    return err;
+};
+
+// ✅ GOOD: Use error unions
+fn processData(data: []const u8) !ProcessedData {
+    if (data.len == 0) return error.EmptyData;
+    // ... processing
+}
+```
+
+### Modern Zig Compatibility
+```zig
+// ✅ GOOD: Use new split functions
+var parts = std.mem.splitSequence(u8, data, delimiter);
+// ❌ AVOID: Deprecated std.mem.split
+
+// ✅ GOOD: Proper print formatting
+std.debug.print("Message\n", .{});
+// ❌ AVOID: Missing argument tuple
+
+// ✅ GOOD: Always include args tuple in writer.print()
+try writer.print("Hello world\n", .{});
+try writer.print("Value: {}\n", .{value});
+try writer.print("{{\"key\":\"value\"}}", .{});
+// ❌ AVOID: Missing arguments tuple - causes compilation errors
+// try writer.print("Hello world\n");  // ERROR!
+// try writer.print("{{");             // ERROR!
+```
+
+## 🏗️ Database Architecture Rules
+
+### Data Structures
+- **Packed Structs**: Use `packed struct` for on-disk formats to control layout
+- **Fixed-Size Arrays**: Prefer fixed arrays over dynamic ones in core types
+- **Memory Alignment**: Consider cache line alignment for hot data structures
+- **Immutable Types**: Make data structures immutable where possible
+
+### Performance Optimization
+```zig
+// ✅ GOOD: Zero-copy operations
+fn processBuffer(buffer: []const u8) void {
+    // Work directly with the buffer, no copying
+}
+
+// ✅ GOOD: Batch operations
+fn insertBatch(items: []const Item) !void {
+    // Process multiple items efficiently
+}
+
+// ✅ GOOD: Pre-allocated buffers
+var buffer: [4096]u8 = undefined;
+var fba = std.heap.FixedBufferAllocator.init(&buffer);
+```
+
+### Persistence Patterns
+- **Write-Ahead Logging**: Always log before applying changes
+- **Append-Only Files**: Never modify existing data, only append
+- **Atomic Operations**: Ensure all changes are atomic and recoverable
+- **Checksums**: Use CRC32 or similar for data integrity
+- **Versioned Formats**: Support format migration for long-term compatibility
+
+## 🌐 HTTP API Design
+
+### RESTful Principles
+- Use standard HTTP methods (GET, POST, PUT, DELETE)
+- Return appropriate HTTP status codes (200, 201, 400, 404, 500)
+- Use JSON for request/response bodies
+- Include proper Content-Type headers
+- Support CORS for web applications
+
+### Endpoint Patterns
+```
+GET    /api/v1/resource          # List resources
+POST   /api/v1/resource          # Create resource
+GET    /api/v1/resource/:id      # Get specific resource
+PUT    /api/v1/resource/:id      # Update resource
+DELETE /api/v1/resource/:id      # Delete resource
+```
+
+### Error Responses
+```json
+{
+  "error": "Resource not found",
+  "code": "RESOURCE_NOT_FOUND",
+  "timestamp": "2024-01-01T00:00:00Z"
+}
+```
+
+## 🧪 Testing Requirements
+
+### Test Structure
+```zig
+test "descriptive test name" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    
+    // Clean up test data
+    std.fs.cwd().deleteTree("test_data") catch {};
+    defer std.fs.cwd().deleteTree("test_data") catch {};
+    
+    // Test implementation
+    // Always use try testing.expect() for assertions
+}
+```
+
+### Testing Principles
+- **Deterministic Tests**: Tests must be reproducible and order-independent
+- **Comprehensive Coverage**: Test all code paths including error conditions
+- **Performance Tests**: Include benchmarks for critical operations
+- **Memory Safety**: Use testing allocator to detect leaks
+- **Cleanup**: Always clean up test data and resources
+
+### Test Categories
+- **Unit Tests**: Test individual functions and modules
+- **Integration Tests**: Test component interactions
+- **Performance Tests**: Measure and validate performance characteristics
+- **Crash Recovery Tests**: Simulate failures and validate recovery
+- **Distributed Tests**: Test multi-node consensus and replication
+
+## 📊 Performance Standards
+
+### Latency Targets
+- Vector similarity queries: < 10ms for 1M vectors
+- Graph traversal queries: < 5ms for depth 3
+- Node/edge insertions: < 1ms each
+- Batch operations: < 100μs per item
+- Snapshot creation: < 1s for 100k items
+
+### Throughput Goals
+- Sustained write rate: > 10k ops/sec
+- Query rate: > 100k ops/sec
+- Network replication: > 1GB/sec
+- Disk I/O: Maximize sequential access
+
+### Resource Efficiency
+- Memory usage: Minimize allocations in hot paths
+- CPU usage: Prefer algorithms with predictable performance
+- Disk usage: Compact data formats and efficient compression
+- Network usage: Binary protocols with minimal overhead
+
+## 🔐 Security & Reliability
+
+### Data Integrity
+- Use checksums for all persistent data
+- Validate all inputs at API boundaries
+- Implement proper bounds checking
+- Use safe string handling practices
+
+### Error Recovery
+- Graceful degradation under resource pressure
+- Automatic recovery from corrupted data
+- Comprehensive logging for debugging
+- Circuit breakers for external dependencies
+
+### Concurrency Safety
+- Avoid shared mutable state
+- Use message passing over shared memory
+- Implement proper synchronization primitives
+- Design for lock-free algorithms where possible
+
+## 📝 Documentation Standards
+
+### Code Comments
+```zig
+/// Brief description of the function's purpose
+/// 
+/// Parameters:
+///   - param1: Description of first parameter
+///   - param2: Description of second parameter
+/// 
+/// Returns: Description of return value
+/// 
+/// Errors: List possible error conditions
+pub fn functionName(param1: Type1, param2: Type2) !ReturnType {
+    // Implementation
+}
+```
+
+### API Documentation
+- Include examples for all endpoints
+- Document error responses and status codes
+- Provide sample requests and responses
+- Include performance characteristics
+- Specify rate limits and constraints
+
+## 🚀 Development Workflow
+
+### Code Quality Gates
+1. **Compilation**: Code must compile without warnings
+2. **Tests**: All tests must pass including new test coverage
+3. **Performance**: No regressions in benchmark tests
+4. **Memory**: No memory leaks detected by testing allocator
+5. **Style**: Follow established code formatting and naming conventions
+
+### Feature Development
+1. **Design First**: Document the design before implementation
+2. **Test-Driven**: Write tests before or alongside implementation
+3. **Incremental**: Build features incrementally with working milestones
+4. **Benchmark**: Measure performance impact of new features
+5. **Document**: Update documentation and examples
+
+### Production Readiness
+- Comprehensive error handling for all edge cases
+- Graceful shutdown procedures
+- Health check endpoints
+- Monitoring and observability hooks
+- Configuration management
+- Deployment automation
+
+## 🎯 Specific ContextDB Guidelines
+
+### Vector Operations
+- Always validate vector dimensions (128 for ContextDB)
+- Use SIMD instructions where available
+- Implement efficient distance metrics (cosine similarity)
+- Batch vector operations for better cache utilization
+
+### Graph Operations
+- Implement efficient adjacency list representations
+- Use breadth-first search for shortest paths
+- Support bidirectional edge traversal
+- Optimize for common query patterns
+
+### Distributed Operations
+- Implement proper Raft consensus protocol
+- Use binary serialization for network efficiency
+- Include checksums in all network messages
+- Handle network partitions gracefully
+
+### HTTP Integration
+- Support both single-node and distributed modes
+- Implement proper request routing
+- Use efficient JSON parsing and generation
+- Include comprehensive error responses
+
+Remember: **Performance, Reliability, and Simplicity** are the three pillars of ContextDB. Every decision should be evaluated against these criteria. 

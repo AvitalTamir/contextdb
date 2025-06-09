@@ -15,6 +15,7 @@ pub const raft = @import("raft.zig");
 pub const raft_network = @import("raft_network.zig");
 pub const distributed_contextdb = @import("distributed_contextdb.zig");
 pub const http_api = @import("http_api.zig");
+pub const monitoring = @import("monitoring.zig");
 
 // Local aliases for internal use
 const types_local = types;
@@ -43,6 +44,9 @@ pub const ContextDB = struct {
     graph_traversal: graph.GraphTraversal,
     vector_search: vector.VectorSearch,
     
+    // Monitoring and metrics
+    metrics: monitoring.MetricsCollector,
+    
     // Optional S3 sync
     s3_sync: ?s3.S3SnapshotSync,
     
@@ -70,6 +74,9 @@ pub const ContextDB = struct {
         const graph_traversal = graph.GraphTraversal.init(allocator);
         const vector_search = vector.VectorSearch.init(allocator);
         
+        // Initialize metrics collector
+        const metrics = try monitoring.MetricsCollector.init(allocator);
+        
         // Initialize S3 sync if configured
         const s3_sync = if (config.s3_bucket) |bucket| 
             s3.S3SnapshotSync.init(allocator, bucket, config.s3_region orelse "us-east-1")
@@ -85,6 +92,7 @@ pub const ContextDB = struct {
             .persistent_index_manager = persistent_index_manager,
             .graph_traversal = graph_traversal,
             .vector_search = vector_search,
+            .metrics = metrics,
             .s3_sync = s3_sync,
             .config = config,
         };
@@ -101,45 +109,91 @@ pub const ContextDB = struct {
         self.vector_index.deinit();
         self.snapshot_manager.deinit();
         self.persistent_index_manager.deinit();
+        self.metrics.deinit();
     }
 
     /// Insert a node into the database
     pub fn insertNode(self: *ContextDB, node: types.Node) !void {
+        const start_time = std.time.nanoTimestamp();
+        
         // Write to log first (write-ahead logging)
         const log_entry = types.LogEntry.initNode(node);
-        try self.append_log.append(log_entry);
+        self.append_log.append(log_entry) catch |err| {
+            self.metrics.recordInsertError();
+            return err;
+        };
         
         // Update in-memory index
-        try self.graph_index.addNode(node);
+        self.graph_index.addNode(node) catch |err| {
+            self.metrics.recordInsertError();
+            return err;
+        };
+        
+        // Record metrics
+        const duration_us = @divTrunc(std.time.nanoTimestamp() - start_time, 1000);
+        self.metrics.recordNodeInsert(@intCast(duration_us));
         
         // Auto-snapshot if configured
-        try self.autoSnapshot();
+        self.autoSnapshot() catch |err| {
+            self.metrics.recordSystemError();
+            return err;
+        };
     }
 
     /// Insert an edge into the database
     pub fn insertEdge(self: *ContextDB, edge: types.Edge) !void {
+        const start_time = std.time.nanoTimestamp();
+        
         // Write to log first
         const log_entry = types.LogEntry.initEdge(edge);
-        try self.append_log.append(log_entry);
+        self.append_log.append(log_entry) catch |err| {
+            self.metrics.recordInsertError();
+            return err;
+        };
         
         // Update in-memory index
-        try self.graph_index.addEdge(edge);
+        self.graph_index.addEdge(edge) catch |err| {
+            self.metrics.recordInsertError();
+            return err;
+        };
+        
+        // Record metrics
+        const duration_us = @divTrunc(std.time.nanoTimestamp() - start_time, 1000);
+        self.metrics.recordEdgeInsert(@intCast(duration_us));
         
         // Auto-snapshot if configured
-        try self.autoSnapshot();
+        self.autoSnapshot() catch |err| {
+            self.metrics.recordSystemError();
+            return err;
+        };
     }
 
     /// Insert a vector into the database
     pub fn insertVector(self: *ContextDB, vec: types.Vector) !void {
+        const start_time = std.time.nanoTimestamp();
+        
         // Write to log first
         const log_entry = types.LogEntry.initVector(vec);
-        try self.append_log.append(log_entry);
+        self.append_log.append(log_entry) catch |err| {
+            self.metrics.recordInsertError();
+            return err;
+        };
         
         // Update in-memory index
-        try self.vector_index.addVector(vec);
+        self.vector_index.addVector(vec) catch |err| {
+            self.metrics.recordInsertError();
+            return err;
+        };
+        
+        // Record metrics
+        const duration_us = @divTrunc(std.time.nanoTimestamp() - start_time, 1000);
+        self.metrics.recordVectorInsert(@intCast(duration_us));
         
         // Auto-snapshot if configured
-        try self.autoSnapshot();
+        self.autoSnapshot() catch |err| {
+            self.metrics.recordSystemError();
+            return err;
+        };
     }
 
     /// Batch insert multiple items efficiently
@@ -172,49 +226,94 @@ pub const ContextDB = struct {
 
     /// Query similar vectors using vector search
     pub fn querySimilar(self: *ContextDB, vector_id: u64, top_k: u32) !std.ArrayList(types.SimilarityResult) {
-        return self.vector_search.querySimilar(&self.vector_index, vector_id, top_k);
+        const start_time = std.time.nanoTimestamp();
+        
+        const result = self.vector_search.querySimilar(&self.vector_index, vector_id, top_k) catch |err| {
+            self.metrics.recordQueryError();
+            return err;
+        };
+        
+        // Record metrics
+        const duration_us = @divTrunc(std.time.nanoTimestamp() - start_time, 1000);
+        self.metrics.recordSimilarityQuery(@intCast(duration_us));
+        
+        return result;
     }
 
     /// Query related nodes using graph traversal
     pub fn queryRelated(self: *ContextDB, start_node_id: u64, depth: u8) !std.ArrayList(types.Node) {
-        return self.graph_traversal.queryRelated(&self.graph_index, start_node_id, depth);
+        const start_time = std.time.nanoTimestamp();
+        
+        const result = self.graph_traversal.queryRelated(&self.graph_index, start_node_id, depth) catch |err| {
+            self.metrics.recordQueryError();
+            return err;
+        };
+        
+        // Record metrics
+        const duration_us = @divTrunc(std.time.nanoTimestamp() - start_time, 1000);
+        self.metrics.recordGraphQuery(@intCast(duration_us));
+        
+        return result;
     }
 
     /// Advanced query: find vectors similar to nodes connected to a given node
     pub fn queryHybrid(self: *ContextDB, start_node_id: u64, depth: u8, top_k: u32) !HybridQueryResult {
-        // First, find related nodes
-        const related_nodes = try self.queryRelated(start_node_id, depth);
-        defer related_nodes.deinit();
-
-        var similar_vectors = std.ArrayList(types.SimilarityResult).init(self.allocator);
-        var node_vector_map = std.AutoHashMap(u64, u64).init(self.allocator);
-        defer node_vector_map.deinit();
-
-        // Find vectors for each related node (assuming node_id == vector_id for simplicity)
-        for (related_nodes.items) |node| {
-            if (self.vector_index.getVector(node.id)) |_| {
-                const node_similar = try self.vector_search.querySimilar(&self.vector_index, node.id, top_k);
-                defer node_similar.deinit();
-                
-                try similar_vectors.appendSlice(node_similar.items);
-                try node_vector_map.put(node.id, node.id);
-            }
-        }
-
-        // Sort and deduplicate similar vectors
-        std.sort.pdq(types.SimilarityResult, similar_vectors.items, {}, compareByDescendingSimilarity);
+        const start_time = std.time.nanoTimestamp();
         
-        // Keep only top results
-        const actual_k = @min(top_k, @as(u32, @intCast(similar_vectors.items.len)));
-        if (similar_vectors.items.len > actual_k) {
-            similar_vectors.shrinkRetainingCapacity(actual_k);
-        }
+        const result = blk: {
+            // First, find related nodes
+            const related_nodes = try self.queryRelated(start_node_id, depth);
+            defer related_nodes.deinit();
 
-        return HybridQueryResult{
-            .related_nodes = related_nodes,
-            .similar_vectors = similar_vectors,
-            .node_vector_map = node_vector_map,
+            var similar_vectors = std.ArrayList(types.SimilarityResult).init(self.allocator);
+            var node_vector_map = std.AutoHashMap(u64, u64).init(self.allocator);
+            defer node_vector_map.deinit();
+
+            // Find vectors for each related node (assuming node_id == vector_id for simplicity)
+            for (related_nodes.items) |node| {
+                if (self.vector_index.getVector(node.id)) |_| {
+                    const node_similar = try self.vector_search.querySimilar(&self.vector_index, node.id, top_k);
+                    defer node_similar.deinit();
+                    
+                    try similar_vectors.appendSlice(node_similar.items);
+                    try node_vector_map.put(node.id, node.id);
+                }
+            }
+
+            // Sort by similarity (descending)
+            std.mem.sort(types.SimilarityResult, similar_vectors.items, {}, compareByDescendingSimilarity);
+
+            // Limit results to top_k
+            if (similar_vectors.items.len > top_k) {
+                similar_vectors.shrinkRetainingCapacity(top_k);
+            }
+
+            // Clone the related nodes to return
+            var cloned_related_nodes = std.ArrayList(types.Node).init(self.allocator);
+            try cloned_related_nodes.appendSlice(related_nodes.items);
+
+            // Clone the node_vector_map to return
+            var cloned_node_vector_map = std.AutoHashMap(u64, u64).init(self.allocator);
+            var map_iter = node_vector_map.iterator();
+            while (map_iter.next()) |entry| {
+                try cloned_node_vector_map.put(entry.key_ptr.*, entry.value_ptr.*);
+            }
+
+            break :blk HybridQueryResult{
+                .related_nodes = cloned_related_nodes,
+                .similar_vectors = similar_vectors,
+                .node_vector_map = cloned_node_vector_map,
+            };
+        } catch |err| {
+            self.metrics.recordQueryError();
+            return err;
         };
+        
+        // Record metrics
+        const duration_us = @divTrunc(std.time.nanoTimestamp() - start_time, 1000);
+        self.metrics.recordHybridQuery(@intCast(duration_us));
+        
+        return result;
     }
 
     /// Create a snapshot manually
@@ -272,19 +371,29 @@ pub const ContextDB = struct {
     }
 
     /// Get database statistics
-    pub fn getStats(self: *ContextDB) DatabaseStats {
+    pub fn getStats(self: *ContextDB) types.DatabaseStats {
         const snapshot_count = if (self.snapshot_manager.listSnapshots()) |snapshots| blk: {
             defer snapshots.deinit();
             break :blk snapshots.items.len;
         } else |_| 0;
         
-        return DatabaseStats{
+        const uptime = std.time.timestamp() - self.metrics.startup_timestamp;
+        
+        const stats = types.DatabaseStats{
             .node_count = self.graph_index.getNodeCount(),
             .edge_count = self.graph_index.getEdgeCount(),
             .vector_count = self.vector_index.getVectorCount(),
             .log_entry_count = self.append_log.getEntryCount(),
-            .snapshot_count = snapshot_count,
+            .snapshot_count = @intCast(snapshot_count),
+            .memory_usage = @intCast(@max(0, self.metrics.memory_usage_bytes.get())),
+            .disk_usage = 0, // TODO: Calculate actual disk usage
+            .uptime_seconds = @intCast(@max(0, uptime)),
         };
+        
+        // Update metrics collector
+        self.metrics.updateDatabaseStats(stats);
+        
+        return stats;
     }
 
     /// Cleanup old data (snapshots and logs)
@@ -547,14 +656,6 @@ pub const HybridQueryResult = struct {
         self.similar_vectors.deinit();
         self.node_vector_map.deinit();
     }
-};
-
-pub const DatabaseStats = struct {
-    node_count: u32,
-    edge_count: u32,
-    vector_count: u32,
-    log_entry_count: u64,
-    snapshot_count: usize,
 };
 
 pub const CleanupResult = struct {
