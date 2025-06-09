@@ -65,11 +65,19 @@ pub const ContextDB = struct {
         const graph_index = graph_local.GraphIndex.init(allocator);
         const vector_index = vector_local.VectorIndex.init(allocator);
         
-        // Initialize snapshot manager
-        const snapshot_manager = try snapshot_local.SnapshotManager.init(allocator, config.data_path);
+        // Initialize snapshot manager with configuration
+        const snapshot_config = if (global_config) |global_cfg| 
+            snapshot_local.SnapshotConfig.fromConfig(global_cfg) 
+        else 
+            null;
+        const snapshot_manager = try snapshot_local.SnapshotManager.init(allocator, config.data_path, snapshot_config);
         
         // Initialize persistent index manager
-        const persistent_index_manager = try persistent_index_local.PersistentIndexManager.init(allocator, config.data_path);
+        const persistent_config = if (global_config) |global_cfg| 
+            persistent_index_local.PersistentIndexConfig.fromConfig(global_cfg) 
+        else 
+            null;
+        const persistent_index_manager = try persistent_index_local.PersistentIndexManager.init(allocator, config.data_path, persistent_config);
         
         // Initialize query engines with configuration
         const graph_config = if (global_config) |global_cfg| 
@@ -85,8 +93,12 @@ pub const ContextDB = struct {
             null;
         const vector_search = vector_local.VectorSearch.init(allocator, vector_config);
         
-        // Initialize metrics collector
-        const metrics = try monitoring.MetricsCollector.init(allocator);
+        // Configure monitoring with global config if provided
+        const monitoring_config = if (global_config) |global_cfg| 
+            monitoring.MonitoringConfig.fromConfig(global_cfg) 
+        else 
+            null;
+        const metrics = try monitoring.MetricsCollector.init(allocator, monitoring_config);
         
         // Initialize S3 sync if configured
         const s3_sync = if (config.s3_bucket) |bucket| 
@@ -427,11 +439,17 @@ pub const ContextDB = struct {
     // Private methods
 
     fn autoSnapshot(self: *ContextDB) !void {
-        if (self.config.auto_snapshot_interval) |interval| {
+        // Use the snapshot manager's configuration for auto interval
+        if (self.snapshot_manager.config.auto_interval > 0) {
             const current_entries = self.append_log.getEntryCount();
-            if (current_entries > 0 and current_entries % interval == 0) {
+            if (current_entries > 0 and current_entries % self.snapshot_manager.config.auto_interval == 0) {
                 var snapshot_info = try self.createSnapshot();
                 defer snapshot_info.deinit();
+                
+                // Auto cleanup if enabled
+                if (self.snapshot_manager.config.cleanup_auto_enable) {
+                    _ = try self.snapshot_manager.cleanup(self.snapshot_manager.config.cleanup_keep_count);
+                }
             }
         }
     }
@@ -542,7 +560,7 @@ pub const ContextDB = struct {
 
     /// Load data from storage with persistent index fast path
     fn loadFromStorageWithPersistentIndexes(self: *ContextDB) !void {
-        if (!self.config.enable_persistent_indexes) {
+        if (!self.persistent_index_manager.isEnabled()) {
             // Fall back to normal loading if persistent indexes disabled
             return self.loadFromStorage();
         }
@@ -552,7 +570,7 @@ pub const ContextDB = struct {
             const start_time = std.time.nanoTimestamp();
             
             const persistent_data = self.persistent_index_manager.loadIndexes() catch |err| {
-                if (self.config.persistent_index_auto_rebuild) {
+                if (self.persistent_index_manager.config.auto_rebuild) {
                     std.debug.print("Failed to load persistent indexes ({}), rebuilding from log...\n", .{err});
                     try self.loadFromStorage();
                     return self.savePersistentIndexes();
@@ -607,7 +625,7 @@ pub const ContextDB = struct {
     
     /// Save current in-memory indexes to persistent storage
     pub fn savePersistentIndexes(self: *ContextDB) !void {
-        if (!self.config.enable_persistent_indexes) return;
+        if (!self.persistent_index_manager.isEnabled()) return;
         
         const start_time = std.time.nanoTimestamp();
         
@@ -632,11 +650,10 @@ pub const ContextDB = struct {
     
     /// Check if persistent indexes should be synced
     fn shouldSyncPersistentIndexes(self: *ContextDB) bool {
-        if (!self.config.enable_persistent_indexes) return false;
+        if (!self.persistent_index_manager.isEnabled()) return false;
         
-        if (self.config.persistent_index_sync_interval) |interval| {
+        if (self.persistent_index_manager.config.sync_interval > 0) {
             // TODO: Track operation count since last sync
-            _ = interval;
             return false; // For now, only manual sync
         }
         

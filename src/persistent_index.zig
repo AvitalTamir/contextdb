@@ -1,9 +1,37 @@
 const std = @import("std");
 const types = @import("types.zig");
+const config = @import("config.zig");
 
 /// Memory-Mapped Persistent Index System
 /// Provides instant startup and crash-safe index persistence
 /// Following TigerBeetle-style programming: deterministic, comprehensive, zero dependencies
+
+/// Persistent index configuration helper
+pub const PersistentIndexConfig = struct {
+    enable: bool,
+    sync_interval: u32,
+    auto_rebuild: bool,
+    memory_alignment: u32,
+    checksum_validation: bool,
+    auto_cleanup: bool,
+    max_file_size_mb: u32,
+    compression_enable: bool,
+    sync_on_shutdown: bool,
+    
+    pub fn fromConfig(global_config: config.Config) PersistentIndexConfig {
+        return PersistentIndexConfig{
+            .enable = global_config.persistent_index_enable,
+            .sync_interval = global_config.persistent_index_sync_interval,
+            .auto_rebuild = global_config.persistent_index_auto_rebuild,
+            .memory_alignment = global_config.persistent_index_memory_alignment,
+            .checksum_validation = global_config.persistent_index_checksum_validation,
+            .auto_cleanup = global_config.persistent_index_auto_cleanup,
+            .max_file_size_mb = global_config.persistent_index_max_file_size_mb,
+            .compression_enable = global_config.persistent_index_compression_enable,
+            .sync_on_shutdown = global_config.persistent_index_sync_on_shutdown,
+        };
+    }
+};
 
 /// Header for all persistent index files
 pub const IndexFileHeader = struct {
@@ -29,12 +57,13 @@ pub const IndexFileHeader = struct {
 /// Memory-mapped file wrapper for safe access
 pub const MappedFile = struct {
     file: std.fs.File,
-    mapping: []align(16384) u8, // Use correct alignment for munmap
+    mapping: []u8, // Simplified - let Zig handle alignment
     size: usize,
     path: []const u8,
     allocator: std.mem.Allocator,
+    alignment: u32,
     
-    pub fn init(allocator: std.mem.Allocator, path: []const u8, size: usize) !MappedFile {
+    pub fn init(allocator: std.mem.Allocator, path: []const u8, size: usize, alignment: u32) !MappedFile {
         const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = false });
         
         // Ensure file is correct size
@@ -59,10 +88,11 @@ pub const MappedFile = struct {
             .size = size,
             .path = path_copy,
             .allocator = allocator,
+            .alignment = alignment,
         };
     }
     
-    pub fn initReadOnly(allocator: std.mem.Allocator, path: []const u8) !MappedFile {
+    pub fn initReadOnly(allocator: std.mem.Allocator, path: []const u8, alignment: u32) !MappedFile {
         const file = try std.fs.cwd().openFile(path, .{});
         const file_size = try file.getEndPos();
         
@@ -83,17 +113,18 @@ pub const MappedFile = struct {
             .size = file_size,
             .path = path_copy,
             .allocator = allocator,
+            .alignment = alignment,
         };
     }
     
     pub fn deinit(self: *MappedFile) void {
-        std.posix.munmap(self.mapping);
+        std.posix.munmap(@alignCast(self.mapping));
         self.file.close();
         self.allocator.free(self.path);
     }
     
     pub fn sync(self: *MappedFile) !void {
-        try std.posix.msync(self.mapping, std.posix.MSF.SYNC);
+        try std.posix.msync(@alignCast(self.mapping), std.posix.MSF.SYNC);
     }
     
     pub fn getHeader(self: *const MappedFile) !*const IndexFileHeader {
@@ -162,7 +193,7 @@ pub const PersistentNodeIndex = struct {
         const total_size = @max(header_size + data_size, header_size + 1); // Ensure minimum size
         
         // Create memory-mapped file
-        var mapped_file = try MappedFile.init(self.allocator, self.path, total_size);
+        var mapped_file = try MappedFile.init(self.allocator, self.path, total_size, 16384);
         
         // Initialize header
         const header = try mapped_file.getHeaderMutable();
@@ -192,7 +223,7 @@ pub const PersistentNodeIndex = struct {
     
     pub fn load(self: *PersistentNodeIndex) ![]const types.Node {
         if (self.mapped_file == null) {
-            self.mapped_file = MappedFile.initReadOnly(self.allocator, self.path) catch |err| switch (err) {
+            self.mapped_file = MappedFile.initReadOnly(self.allocator, self.path, 16384) catch |err| switch (err) {
                 error.FileNotFound => return &[_]types.Node{}, // No index exists yet
                 else => return err,
             };
@@ -247,7 +278,7 @@ pub const PersistentEdgeIndex = struct {
         const data_size = edges.len * @sizeOf(types.Edge);
         const total_size = @max(header_size + data_size, header_size + 1); // Ensure minimum size
         
-        var mapped_file = try MappedFile.init(self.allocator, self.path, total_size);
+        var mapped_file = try MappedFile.init(self.allocator, self.path, total_size, 16384);
         
         const header = try mapped_file.getHeaderMutable();
         header.* = IndexFileHeader{
@@ -281,7 +312,7 @@ pub const PersistentEdgeIndex = struct {
     
     pub fn load(self: *PersistentEdgeIndex) ![]const types.Edge {
         if (self.mapped_file == null) {
-            self.mapped_file = MappedFile.initReadOnly(self.allocator, self.path) catch |err| switch (err) {
+            self.mapped_file = MappedFile.initReadOnly(self.allocator, self.path, 16384) catch |err| switch (err) {
                 error.FileNotFound => return &[_]types.Edge{},
                 else => return err,
             };
@@ -359,7 +390,7 @@ pub const PersistentVectorIndex = struct {
         const data_size = vectors.len * @sizeOf(types.Vector);
         const total_size = @max(header_size + data_size, header_size + 1); // Ensure minimum size
         
-        var mapped_file = try MappedFile.init(self.allocator, self.path, total_size);
+        var mapped_file = try MappedFile.init(self.allocator, self.path, total_size, 16384);
         
         const header = try mapped_file.getHeaderMutable();
         header.* = IndexFileHeader{
@@ -392,7 +423,7 @@ pub const PersistentVectorIndex = struct {
     
     pub fn load(self: *PersistentVectorIndex) ![]const types.Vector {
         if (self.mapped_file == null) {
-            self.mapped_file = MappedFile.initReadOnly(self.allocator, self.path) catch |err| switch (err) {
+            self.mapped_file = MappedFile.initReadOnly(self.allocator, self.path, 16384) catch |err| switch (err) {
                 error.FileNotFound => return &[_]types.Vector{},
                 else => return err,
             };
@@ -437,22 +468,28 @@ pub const PersistentVectorIndex = struct {
 pub const PersistentIndexManager = struct {
     allocator: std.mem.Allocator,
     index_dir: []const u8,
+    config: PersistentIndexConfig,
     node_index: PersistentNodeIndex,
     edge_index: PersistentEdgeIndex,
     vector_index: PersistentVectorIndex,
     
-    pub fn init(allocator: std.mem.Allocator, data_path: []const u8) !PersistentIndexManager {
+    pub fn init(allocator: std.mem.Allocator, data_path: []const u8, persistent_config: ?PersistentIndexConfig) !PersistentIndexManager {
+        const cfg = persistent_config orelse PersistentIndexConfig.fromConfig(config.Config{});
+        
         const index_dir = try std.fs.path.join(allocator, &[_][]const u8{ data_path, "indexes" });
         
-        // Ensure index directory exists
-        std.fs.cwd().makeDir(index_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        // Ensure index directory exists only if persistent indexes are enabled
+        if (cfg.enable) {
+            std.fs.cwd().makeDir(index_dir) catch |err| switch (err) {
+                error.PathAlreadyExists => {},
+                else => return err,
+            };
+        }
         
         return PersistentIndexManager{
             .allocator = allocator,
             .index_dir = index_dir,
+            .config = cfg,
             .node_index = try PersistentNodeIndex.init(allocator, index_dir),
             .edge_index = try PersistentEdgeIndex.init(allocator, index_dir),
             .vector_index = try PersistentVectorIndex.init(allocator, index_dir),
@@ -472,6 +509,11 @@ pub const PersistentIndexManager = struct {
                       edges: []const types.Edge, 
                       vectors: []const types.Vector) !void {
         
+        // Check if persistent indexes are enabled
+        if (!self.config.enable) {
+            return; // Skip saving if disabled
+        }
+        
         try self.node_index.create(nodes);
         try self.edge_index.create(edges);
         try self.vector_index.create(vectors);
@@ -483,6 +525,15 @@ pub const PersistentIndexManager = struct {
         edges: []const types.Edge,
         vectors: []const types.Vector,
     } {
+        // Check if persistent indexes are enabled
+        if (!self.config.enable) {
+            return .{
+                .nodes = &[_]types.Node{},
+                .edges = &[_]types.Edge{},
+                .vectors = &[_]types.Vector{},
+            };
+        }
+        
         return .{
             .nodes = try self.node_index.load(),
             .edges = try self.edge_index.load(),
@@ -492,9 +543,18 @@ pub const PersistentIndexManager = struct {
     
     /// Check if persistent indexes exist
     pub fn indexesExist(self: *const PersistentIndexManager) bool {
+        if (!self.config.enable) {
+            return false; // If disabled, always return false
+        }
+        
         return self.node_index.exists() and 
                self.edge_index.exists() and 
                self.vector_index.exists();
+    }
+    
+    /// Check if persistent indexes are enabled in configuration
+    pub fn isEnabled(self: *const PersistentIndexManager) bool {
+        return self.config.enable;
     }
     
     /// Get index statistics
@@ -579,4 +639,182 @@ pub const IndexUtils = struct {
         
         return vectors;
     }
-}; 
+};
+
+test "PersistentIndexConfig from global config" {
+    const global_config = config.Config{
+        .persistent_index_enable = false,
+        .persistent_index_sync_interval = 250,
+        .persistent_index_auto_rebuild = false,
+        .persistent_index_memory_alignment = 32768,
+        .persistent_index_checksum_validation = false,
+        .persistent_index_auto_cleanup = true,
+        .persistent_index_max_file_size_mb = 2048,
+        .persistent_index_compression_enable = true,
+        .persistent_index_sync_on_shutdown = false,
+    };
+    
+    const persistent_config = PersistentIndexConfig.fromConfig(global_config);
+    
+    try std.testing.expect(persistent_config.enable == false);
+    try std.testing.expect(persistent_config.sync_interval == 250);
+    try std.testing.expect(persistent_config.auto_rebuild == false);
+    try std.testing.expect(persistent_config.memory_alignment == 32768);
+    try std.testing.expect(persistent_config.checksum_validation == false);
+    try std.testing.expect(persistent_config.auto_cleanup == true);
+    try std.testing.expect(persistent_config.max_file_size_mb == 2048);
+    try std.testing.expect(persistent_config.compression_enable == true);
+    try std.testing.expect(persistent_config.sync_on_shutdown == false);
+}
+
+test "PersistentIndexManager with custom configuration" {
+    const allocator = std.testing.allocator;
+    
+    // Clean up any existing test data
+    std.fs.cwd().deleteTree("test_persistent_config") catch {};
+    defer std.fs.cwd().deleteTree("test_persistent_config") catch {};
+    
+    // Create the parent directory
+    try std.fs.cwd().makeDir("test_persistent_config");
+    
+    const persistent_config = PersistentIndexConfig{
+        .enable = true,
+        .sync_interval = 50,
+        .auto_rebuild = true,
+        .memory_alignment = 65536,
+        .checksum_validation = true,
+        .auto_cleanup = false,
+        .max_file_size_mb = 512,
+        .compression_enable = false,
+        .sync_on_shutdown = true,
+    };
+    
+    var manager = try PersistentIndexManager.init(allocator, "test_persistent_config", persistent_config);
+    defer manager.deinit();
+    
+    // Verify configuration is applied
+    try std.testing.expect(manager.config.enable == true);
+    try std.testing.expect(manager.config.sync_interval == 50);
+    try std.testing.expect(manager.config.auto_rebuild == true);
+    try std.testing.expect(manager.config.memory_alignment == 65536);
+    try std.testing.expect(manager.config.checksum_validation == true);
+    try std.testing.expect(manager.config.auto_cleanup == false);
+    try std.testing.expect(manager.config.max_file_size_mb == 512);
+    try std.testing.expect(manager.config.compression_enable == false);
+    try std.testing.expect(manager.config.sync_on_shutdown == true);
+    
+    // Test that methods respect configuration
+    try std.testing.expect(manager.isEnabled() == true);
+    try std.testing.expect(manager.indexesExist() == false); // No indexes created yet
+}
+
+test "PersistentIndexManager with disabled configuration" {
+    const allocator = std.testing.allocator;
+    
+    const persistent_config = PersistentIndexConfig{
+        .enable = false,
+        .sync_interval = 100,
+        .auto_rebuild = true,
+        .memory_alignment = 16384,
+        .checksum_validation = true,
+        .auto_cleanup = true,
+        .max_file_size_mb = 1024,
+        .compression_enable = false,
+        .sync_on_shutdown = true,
+    };
+    
+    var manager = try PersistentIndexManager.init(allocator, "test_disabled_persistent", persistent_config);
+    defer manager.deinit();
+    
+    // Verify disabled state
+    try std.testing.expect(manager.isEnabled() == false);
+    try std.testing.expect(manager.indexesExist() == false);
+    
+    // Test that save/load operations are no-ops when disabled
+    const nodes = [_]types.Node{types.Node.init(1, "TestNode")};
+    const edges = [_]types.Edge{types.Edge.init(1, 2, types.EdgeKind.owns)};
+    const dims = [_]f32{1.0} ++ [_]f32{0.0} ** 127;
+    const vectors = [_]types.Vector{types.Vector.init(1, &dims)};
+    
+    // Save should succeed but do nothing
+    try manager.saveIndexes(&nodes, &edges, &vectors);
+    
+    // Load should return empty data
+    const loaded_data = try manager.loadIndexes();
+    try std.testing.expect(loaded_data.nodes.len == 0);
+    try std.testing.expect(loaded_data.edges.len == 0);
+    try std.testing.expect(loaded_data.vectors.len == 0);
+}
+
+test "PersistentIndexManager with default configuration" {
+    const allocator = std.testing.allocator;
+    
+    // Clean up any existing test data
+    std.fs.cwd().deleteTree("test_default_persistent") catch {};
+    defer std.fs.cwd().deleteTree("test_default_persistent") catch {};
+    
+    // Create the parent directory
+    try std.fs.cwd().makeDir("test_default_persistent");
+    
+    var manager = try PersistentIndexManager.init(allocator, "test_default_persistent", null);
+    defer manager.deinit();
+    
+    // Verify default values are applied
+    try std.testing.expect(manager.config.enable == true);
+    try std.testing.expect(manager.config.sync_interval == 100);
+    try std.testing.expect(manager.config.auto_rebuild == true);
+    try std.testing.expect(manager.config.memory_alignment == 16384);
+    try std.testing.expect(manager.config.checksum_validation == true);
+    try std.testing.expect(manager.config.auto_cleanup == true);
+    try std.testing.expect(manager.config.max_file_size_mb == 1024);
+    try std.testing.expect(manager.config.compression_enable == false);
+    try std.testing.expect(manager.config.sync_on_shutdown == true);
+    
+    try std.testing.expect(manager.isEnabled() == true);
+}
+
+test "Persistent index configuration integration with global config" {
+    const allocator = std.testing.allocator;
+    
+    // Create a comprehensive global config
+    const global_config = config.Config{
+        .persistent_index_enable = true,
+        .persistent_index_sync_interval = 75,
+        .persistent_index_auto_rebuild = false,
+        .persistent_index_memory_alignment = 8192,
+        .persistent_index_checksum_validation = false,
+        .persistent_index_auto_cleanup = false,
+        .persistent_index_max_file_size_mb = 256,
+        .persistent_index_compression_enable = true,
+        .persistent_index_sync_on_shutdown = false,
+    };
+    
+    // Test PersistentIndexConfig.fromConfig
+    const persistent_cfg = PersistentIndexConfig.fromConfig(global_config);
+    try std.testing.expect(persistent_cfg.enable == true);
+    try std.testing.expect(persistent_cfg.sync_interval == 75);
+    try std.testing.expect(persistent_cfg.auto_rebuild == false);
+    try std.testing.expect(persistent_cfg.memory_alignment == 8192);
+    try std.testing.expect(persistent_cfg.checksum_validation == false);
+    try std.testing.expect(persistent_cfg.auto_cleanup == false);
+    try std.testing.expect(persistent_cfg.max_file_size_mb == 256);
+    try std.testing.expect(persistent_cfg.compression_enable == true);
+    try std.testing.expect(persistent_cfg.sync_on_shutdown == false);
+    
+    // Clean up any existing test data
+    std.fs.cwd().deleteTree("test_integration_persistent") catch {};
+    defer std.fs.cwd().deleteTree("test_integration_persistent") catch {};
+    
+    // Create the parent directory
+    try std.fs.cwd().makeDir("test_integration_persistent");
+    
+    // Test PersistentIndexManager with the config
+    var manager = try PersistentIndexManager.init(allocator, "test_integration_persistent", persistent_cfg);
+    defer manager.deinit();
+    
+    // Verify integration works end-to-end
+    try std.testing.expect(manager.config.enable == true);
+    try std.testing.expect(manager.config.sync_interval == 75);
+    try std.testing.expect(manager.config.memory_alignment == 8192);
+    try std.testing.expect(manager.isEnabled() == true);
+} 

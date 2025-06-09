@@ -2,6 +2,8 @@ const std = @import("std");
 const contextdb = @import("main.zig");
 const raft = @import("raft.zig");
 const raft_network = @import("raft_network.zig");
+const config = @import("config.zig");
+const testing = std.testing;
 
 /// Distributed ContextDB with Raft consensus
 /// Provides high availability through leader election and log replication
@@ -66,25 +68,25 @@ pub const DistributedContextDB = struct {
     operation_count: u64 = 0,
     replication_latency_ms: u64 = 0,
     
-    pub fn init(allocator: std.mem.Allocator, config: DistributedConfig) !DistributedContextDB {
+    pub fn init(allocator: std.mem.Allocator, distributed_config: DistributedConfig) !DistributedContextDB {
         // Initialize ContextDB engine
-        const contextdb_engine = try contextdb.ContextDB.init(allocator, config.contextdb_config);
+        const contextdb_engine = try contextdb.ContextDB.init(allocator, distributed_config.contextdb_config);
         
         // Create Raft cluster configuration
-        const cluster_config = try createRaftClusterConfig(allocator, config.cluster_nodes);
+        const cluster_config = try createRaftClusterConfig(allocator, distributed_config.cluster_nodes);
         
         // Initialize Raft node
         const raft_node = try raft_network.NetworkedRaftNode.init(
             allocator,
-            config.node_id,
+            distributed_config.node_id,
             cluster_config,
-            config.contextdb_config.data_path,
-            config.raft_port
+            distributed_config.contextdb_config.data_path,
+            distributed_config.raft_port
         );
         
         return DistributedContextDB{
             .allocator = allocator,
-            .config = config,
+            .config = distributed_config,
             .contextdb = contextdb_engine,
             .raft_node = raft_node,
         };
@@ -380,7 +382,7 @@ pub fn demo() !void {
         .{ .id = 3, .address = "127.0.0.1", .raft_port = 8003 },
     };
     
-    const config = DistributedConfig{
+    const distributed_config = DistributedConfig{
         .contextdb_config = contextdb.ContextDBConfig{
             .data_path = "distributed_demo/node1",
             .enable_persistent_indexes = true,
@@ -391,12 +393,12 @@ pub fn demo() !void {
     };
     
     // Initialize distributed database
-    var distributed_db = try DistributedContextDB.init(allocator, config);
+    var distributed_db = try DistributedContextDB.init(allocator, distributed_config);
     defer distributed_db.deinit();
     defer std.fs.cwd().deleteTree("distributed_demo") catch {};
     
     std.debug.print("DistributedContextDB Demo Started\n", .{});
-    std.debug.print("Node ID: {}\n", .{config.node_id});
+    std.debug.print("Node ID: {}\n", .{distributed_config.node_id});
     std.debug.print("Cluster size: {}\n", .{cluster_nodes.len});
     
     // Note: In a real demo, you'd start multiple nodes in separate processes
@@ -409,4 +411,135 @@ pub fn demo() !void {
     
     std.debug.print("DistributedContextDB Demo Setup Complete!\n", .{});
     std.debug.print("To run a full cluster, start multiple processes with different node IDs\n", .{});
+}
+
+/// Cluster configuration helper
+pub const ClusterConfig = struct {
+    replication_factor: u8,
+    read_quorum: u8,
+    write_quorum: u8,
+    auto_join: bool,
+    bootstrap_expect: u8,
+    failure_detection_ms: u32,
+    split_brain_protection: bool,
+    
+    pub fn fromConfig(global_cfg: config.Config) ClusterConfig {
+        return ClusterConfig{
+            .replication_factor = global_cfg.cluster_replication_factor,
+            .read_quorum = global_cfg.cluster_read_quorum,
+            .write_quorum = global_cfg.cluster_write_quorum,
+            .auto_join = global_cfg.cluster_auto_join,
+            .bootstrap_expect = global_cfg.cluster_bootstrap_expect,
+            .failure_detection_ms = global_cfg.cluster_failure_detection_ms,
+            .split_brain_protection = global_cfg.cluster_split_brain_protection,
+        };
+    }
+};
+
+test "ClusterConfig from global config" {
+    const global_config = config.Config{
+        .cluster_replication_factor = 5,
+        .cluster_read_quorum = 3,
+        .cluster_write_quorum = 3,
+        .cluster_auto_join = false,
+        .cluster_bootstrap_expect = 5,
+        .cluster_failure_detection_ms = 15000,
+        .cluster_split_brain_protection = false,
+    };
+    
+    const cluster_cfg = ClusterConfig.fromConfig(global_config);
+    try std.testing.expect(cluster_cfg.replication_factor == 5);
+    try std.testing.expect(cluster_cfg.read_quorum == 3);
+    try std.testing.expect(cluster_cfg.write_quorum == 3);
+    try std.testing.expect(cluster_cfg.auto_join == false);
+    try std.testing.expect(cluster_cfg.bootstrap_expect == 5);
+    try std.testing.expect(cluster_cfg.failure_detection_ms == 15000);
+    try std.testing.expect(cluster_cfg.split_brain_protection == false);
+}
+
+test "ClusterConfig default values" {
+    const global_config = config.Config{};
+    
+    const cluster_cfg = ClusterConfig.fromConfig(global_config);
+    try std.testing.expect(cluster_cfg.replication_factor == 3);
+    try std.testing.expect(cluster_cfg.read_quorum == 2);
+    try std.testing.expect(cluster_cfg.write_quorum == 2);
+    try std.testing.expect(cluster_cfg.auto_join == true);
+    try std.testing.expect(cluster_cfg.bootstrap_expect == 3);
+    try std.testing.expect(cluster_cfg.failure_detection_ms == 10000);
+    try std.testing.expect(cluster_cfg.split_brain_protection == true);
+}
+
+test "Cluster configuration integration test" {
+    // Create a comprehensive global config with both Raft and cluster settings
+    const global_config = config.Config{
+        .raft_enable = true,
+        .raft_node_id = 1,
+        .raft_port = 8001,
+        .raft_election_timeout_min_ms = 200,
+        .raft_election_timeout_max_ms = 400,
+        .raft_heartbeat_interval_ms = 75,
+        .cluster_replication_factor = 3,
+        .cluster_read_quorum = 2,
+        .cluster_write_quorum = 2,
+        .cluster_auto_join = true,
+        .cluster_bootstrap_expect = 3,
+        .cluster_failure_detection_ms = 12000,
+        .cluster_split_brain_protection = true,
+    };
+    
+    // Test ClusterConfig.fromConfig
+    const cluster_cfg = ClusterConfig.fromConfig(global_config);
+    try std.testing.expect(cluster_cfg.replication_factor == 3);
+    try std.testing.expect(cluster_cfg.read_quorum == 2);
+    try std.testing.expect(cluster_cfg.write_quorum == 2);
+    try std.testing.expect(cluster_cfg.auto_join == true);
+    try std.testing.expect(cluster_cfg.bootstrap_expect == 3);
+    try std.testing.expect(cluster_cfg.failure_detection_ms == 12000);
+    try std.testing.expect(cluster_cfg.split_brain_protection == true);
+    
+    // Test RaftConfig.fromConfig as well for integration
+    const raft_cfg = raft.RaftConfig.fromConfig(global_config);
+    try std.testing.expect(raft_cfg.enable == true);
+    try std.testing.expect(raft_cfg.node_id == 1);
+    try std.testing.expect(raft_cfg.port == 8001);
+    try std.testing.expect(raft_cfg.election_timeout_min_ms == 200);
+    try std.testing.expect(raft_cfg.election_timeout_max_ms == 400);
+    try std.testing.expect(raft_cfg.heartbeat_interval_ms == 75);
+    
+    std.debug.print("✓ Cluster configuration integration test passed\n", .{});
+}
+
+test "Distributed ContextDB configuration" {
+    const cluster_nodes = [_]DistributedConfig.ClusterNode{
+        .{ .id = 1, .address = "127.0.0.1", .raft_port = 8001 },
+        .{ .id = 2, .address = "127.0.0.1", .raft_port = 8002 },
+        .{ .id = 3, .address = "127.0.0.1", .raft_port = 8003 },
+    };
+    
+    const distributed_config = DistributedConfig{
+        .contextdb_config = .{
+            .data_path = "test_distributed_config",
+            .enable_persistent_indexes = true,
+        },
+        .node_id = 1,
+        .raft_port = 8001,
+        .cluster_nodes = &cluster_nodes,
+        .replication_factor = 3,
+        .read_quorum = 2,
+        .write_quorum = 2,
+    };
+    
+    // Test configuration values
+    try testing.expect(distributed_config.node_id == 1);
+    try testing.expect(distributed_config.raft_port == 8001);
+    try testing.expect(distributed_config.cluster_nodes.len == 3);
+    try testing.expect(distributed_config.replication_factor == 3);
+    try testing.expect(distributed_config.read_quorum == 2);
+    try testing.expect(distributed_config.write_quorum == 2);
+    
+    // Test cluster node properties
+    try testing.expect(distributed_config.cluster_nodes[0].id == 1);
+    try testing.expect(std.mem.eql(u8, distributed_config.cluster_nodes[0].address, "127.0.0.1"));
+    try testing.expect(distributed_config.cluster_nodes[0].raft_port == 8001);
 } 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const config = @import("config.zig");
 
 /// Iceberg-style snapshot manager for ContextDB
 /// Creates immutable snapshots with metadata and data files
@@ -7,8 +8,21 @@ pub const SnapshotManager = struct {
     allocator: std.mem.Allocator,
     base_path: []const u8,
     current_snapshot_id: u64,
+    config: SnapshotConfig,
 
-    pub fn init(allocator: std.mem.Allocator, base_path: []const u8) !SnapshotManager {
+    pub fn init(allocator: std.mem.Allocator, base_path: []const u8, snapshot_config: ?SnapshotConfig) !SnapshotManager {
+        // Use provided config or defaults
+        const config_to_use = snapshot_config orelse SnapshotConfig{
+            .auto_interval = 0,
+            .max_metadata_size_mb = 10,
+            .compression_enable = false,
+            .cleanup_keep_count = 10,
+            .cleanup_auto_enable = true,
+            .binary_format_enable = true,
+            .concurrent_writes = false,
+            .verify_checksums = true,
+        };
+
         // Create base directory structure
         try std.fs.cwd().makePath(base_path);
         
@@ -35,6 +49,7 @@ pub const SnapshotManager = struct {
             .allocator = allocator,
             .base_path = try allocator.dupe(u8, base_path),
             .current_snapshot_id = latest_id,
+            .config = config_to_use,
         };
     }
 
@@ -127,7 +142,8 @@ pub const SnapshotManager = struct {
         };
         defer file.close();
 
-        const content = try file.readToEndAlloc(self.allocator, 1024 * 1024); // 1MB max
+        const max_size_bytes = self.config.max_metadata_size_mb * 1024 * 1024;
+        const content = try file.readToEndAlloc(self.allocator, max_size_bytes);
         defer self.allocator.free(content);
 
         return try self.parseSnapshotMetadata(content);
@@ -660,7 +676,7 @@ test "SnapshotManager creation and cleanup" {
     // Clean up any existing test data
     std.fs.cwd().deleteTree(base_path) catch {};
     
-    var manager = try SnapshotManager.init(allocator, base_path);
+    var manager = try SnapshotManager.init(allocator, base_path, null);
     defer manager.deinit();
     defer std.fs.cwd().deleteTree(base_path) catch {};
 
@@ -677,7 +693,7 @@ test "SnapshotManager create and load snapshot" {
     // Clean up any existing test data
     std.fs.cwd().deleteTree(base_path) catch {};
     
-    var manager = try SnapshotManager.init(allocator, base_path);
+    var manager = try SnapshotManager.init(allocator, base_path, null);
     defer manager.deinit();
     defer std.fs.cwd().deleteTree(base_path) catch {};
 
@@ -697,7 +713,7 @@ test "SnapshotManager create and load snapshot" {
     };
 
     // Create snapshot
-    var snapshot_info = try manager.createSnapshot(&test_vectors, &test_nodes, &test_edges);
+    const snapshot_info = try manager.createSnapshot(&test_vectors, &test_nodes, &test_edges);
     defer snapshot_info.deinit();
 
     try std.testing.expect(snapshot_info.snapshot_id == 1);
@@ -710,4 +726,160 @@ test "SnapshotManager create and load snapshot" {
     defer loaded_info.deinit();
     
     try std.testing.expect(loaded_info.snapshot_id == 1);
+}
+
+/// Snapshot configuration helper
+pub const SnapshotConfig = struct {
+    auto_interval: u32,
+    max_metadata_size_mb: u32,
+    compression_enable: bool,
+    cleanup_keep_count: u32,
+    cleanup_auto_enable: bool,
+    binary_format_enable: bool,
+    concurrent_writes: bool,
+    verify_checksums: bool,
+    
+    pub fn fromConfig(global_cfg: config.Config) SnapshotConfig {
+        return SnapshotConfig{
+            .auto_interval = global_cfg.snapshot_auto_interval,
+            .max_metadata_size_mb = global_cfg.snapshot_max_metadata_size_mb,
+            .compression_enable = global_cfg.snapshot_compression_enable,
+            .cleanup_keep_count = global_cfg.snapshot_cleanup_keep_count,
+            .cleanup_auto_enable = global_cfg.snapshot_cleanup_auto_enable,
+            .binary_format_enable = global_cfg.snapshot_binary_format_enable,
+            .concurrent_writes = global_cfg.snapshot_concurrent_writes,
+            .verify_checksums = global_cfg.snapshot_verify_checksums,
+        };
+    }
+};
+
+test "SnapshotConfig from global config" {
+    const global_config = config.Config{
+        .snapshot_auto_interval = 250,
+        .snapshot_max_metadata_size_mb = 20,
+        .snapshot_compression_enable = true,
+        .snapshot_cleanup_keep_count = 5,
+        .snapshot_cleanup_auto_enable = false,
+        .snapshot_binary_format_enable = false,
+        .snapshot_concurrent_writes = true,
+        .snapshot_verify_checksums = false,
+    };
+    
+    const snapshot_cfg = SnapshotConfig.fromConfig(global_config);
+    try std.testing.expect(snapshot_cfg.auto_interval == 250);
+    try std.testing.expect(snapshot_cfg.max_metadata_size_mb == 20);
+    try std.testing.expect(snapshot_cfg.compression_enable == true);
+    try std.testing.expect(snapshot_cfg.cleanup_keep_count == 5);
+    try std.testing.expect(snapshot_cfg.cleanup_auto_enable == false);
+    try std.testing.expect(snapshot_cfg.binary_format_enable == false);
+    try std.testing.expect(snapshot_cfg.concurrent_writes == true);
+    try std.testing.expect(snapshot_cfg.verify_checksums == false);
+}
+
+test "SnapshotManager with custom configuration" {
+    const allocator = std.testing.allocator;
+    const base_path = "test_snapshot_config";
+    
+    // Clean up any existing test data
+    std.fs.cwd().deleteTree(base_path) catch {};
+    defer std.fs.cwd().deleteTree(base_path) catch {};
+    
+    // Create custom snapshot config
+    const snapshot_config = SnapshotConfig{
+        .auto_interval = 100,
+        .max_metadata_size_mb = 5,
+        .compression_enable = false,
+        .cleanup_keep_count = 3,
+        .cleanup_auto_enable = true,
+        .binary_format_enable = true,
+        .concurrent_writes = false,
+        .verify_checksums = true,
+    };
+    
+    var manager = try SnapshotManager.init(allocator, base_path, snapshot_config);
+    defer manager.deinit();
+    
+    // Verify configuration was applied
+    try std.testing.expect(manager.config.auto_interval == 100);
+    try std.testing.expect(manager.config.max_metadata_size_mb == 5);
+    try std.testing.expect(manager.config.cleanup_keep_count == 3);
+    try std.testing.expect(manager.config.cleanup_auto_enable == true);
+    try std.testing.expect(manager.config.binary_format_enable == true);
+    try std.testing.expect(manager.config.verify_checksums == true);
+}
+
+test "SnapshotManager with default configuration" {
+    const allocator = std.testing.allocator;
+    const base_path = "test_snapshot_default";
+    
+    // Clean up any existing test data
+    std.fs.cwd().deleteTree(base_path) catch {};
+    defer std.fs.cwd().deleteTree(base_path) catch {};
+    
+    var manager = try SnapshotManager.init(allocator, base_path, null);
+    defer manager.deinit();
+    
+    // Verify default configuration
+    try std.testing.expect(manager.config.auto_interval == 0);
+    try std.testing.expect(manager.config.max_metadata_size_mb == 10);
+    try std.testing.expect(manager.config.compression_enable == false);
+    try std.testing.expect(manager.config.cleanup_keep_count == 10);
+    try std.testing.expect(manager.config.cleanup_auto_enable == true);
+    try std.testing.expect(manager.config.binary_format_enable == true);
+    try std.testing.expect(manager.config.concurrent_writes == false);
+    try std.testing.expect(manager.config.verify_checksums == true);
+}
+
+test "SnapshotManager configuration integration test" {
+    const allocator = std.testing.allocator;
+    const base_path = "test_snapshot_integration";
+    
+    // Clean up any existing test data
+    std.fs.cwd().deleteTree(base_path) catch {};
+    defer std.fs.cwd().deleteTree(base_path) catch {};
+    
+    // Create a comprehensive global config
+    const global_config = config.Config{
+        .snapshot_auto_interval = 150,
+        .snapshot_max_metadata_size_mb = 15,
+        .snapshot_compression_enable = false,
+        .snapshot_cleanup_keep_count = 7,
+        .snapshot_cleanup_auto_enable = true,
+        .snapshot_binary_format_enable = true,
+        .snapshot_concurrent_writes = false,
+        .snapshot_verify_checksums = true,
+    };
+    
+    // Test SnapshotConfig.fromConfig
+    const snapshot_cfg = SnapshotConfig.fromConfig(global_config);
+    try std.testing.expect(snapshot_cfg.auto_interval == 150);
+    try std.testing.expect(snapshot_cfg.max_metadata_size_mb == 15);
+    try std.testing.expect(snapshot_cfg.cleanup_keep_count == 7);
+    
+    // Test SnapshotManager with the config
+    var manager = try SnapshotManager.init(allocator, base_path, snapshot_cfg);
+    defer manager.deinit();
+    
+    // Verify integration works end-to-end
+    try std.testing.expect(manager.config.auto_interval == 150);
+    try std.testing.expect(manager.config.max_metadata_size_mb == 15);
+    try std.testing.expect(manager.config.cleanup_keep_count == 7);
+    
+    // Test that configuration affects actual operations
+    const test_nodes = [_]types.Node{
+        types.Node.init(1, "TestNode1"),
+        types.Node.init(2, "TestNode2"),
+    };
+    
+    // Create snapshot with correct parameter order: vectors, nodes, edges
+    const snapshot_info = try manager.createSnapshot(&[_]types.Vector{}, &test_nodes, &[_]types.Edge{});
+    defer snapshot_info.deinit();
+    
+    // Verify snapshot was created successfully
+    try std.testing.expect(snapshot_info.snapshot_id > 0);
+    try std.testing.expect(snapshot_info.counts.nodes == 2);
+    try std.testing.expect(snapshot_info.counts.vectors == 0);
+    try std.testing.expect(snapshot_info.counts.edges == 0);
+    
+    std.debug.print("✓ Snapshot configuration integration test passed\n", .{});
 } 

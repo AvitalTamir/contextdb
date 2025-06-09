@@ -91,7 +91,184 @@ graph_path_cache_size = 1000
 # Use bidirectional search for shortest paths (true/false)
 graph_enable_bidirectional_search = true
 
-# Future configuration sections will be added here as the system grows
+# Monitoring and Metrics Configuration
+# How often to collect system metrics (in milliseconds)
+metrics_collection_interval_ms = 1000
+
+# Window size for rate calculations (number of samples)
+metrics_rate_tracker_window_size = 60
+
+# Enable latency histogram collection (true/false)
+metrics_histogram_enable = true
+
+# Enable Prometheus metrics export (true/false)
+metrics_export_prometheus = true
+
+# Enable JSON metrics export (true/false)
+metrics_export_json = true
+
+# Health check execution interval (in milliseconds)
+health_check_interval_ms = 5000
+
+# Individual health check timeout (in milliseconds)
+health_check_timeout_ms = 1000
+
+# Enable memory usage tracking (true/false)
+memory_stats_enable = true
+
+# Enable error rate tracking (true/false)
+error_tracking_enable = true
+
+# Persistent Index Configuration
+# Enable persistent memory-mapped indexes for instant startup (true/false)
+persistent_index_enable = true
+
+# Sync indexes to disk every N operations (0 = manual sync only)
+persistent_index_sync_interval = 100
+
+# Automatically rebuild corrupted indexes from log (true/false)
+persistent_index_auto_rebuild = true
+
+# Memory alignment for mmap operations (bytes, should be power of 2)
+persistent_index_memory_alignment = 16384
+
+# Enable CRC32 checksum validation for data integrity (true/false)
+persistent_index_checksum_validation = true
+
+# Automatically cleanup old index files (true/false)
+persistent_index_auto_cleanup = true
+
+# Maximum size per index file in MB (helps with memory usage)
+persistent_index_max_file_size_mb = 1024
+
+# Enable index compression - future feature (true/false)
+persistent_index_compression_enable = false
+
+# Force sync indexes on database shutdown (true/false)
+persistent_index_sync_on_shutdown = true
+
+# Snapshot System Configuration
+# Create snapshot every N operations (0 = disabled)
+snapshot_auto_interval = 0
+
+# Maximum size for snapshot metadata files in MB
+snapshot_max_metadata_size_mb = 10
+
+# Enable snapshot compression - future feature (true/false)
+snapshot_compression_enable = false
+
+# Keep this many snapshots during cleanup
+snapshot_cleanup_keep_count = 10
+
+# Automatically cleanup old snapshots (true/false)
+snapshot_cleanup_auto_enable = true
+
+# Use binary format for vector data vs JSON (true/false)
+snapshot_binary_format_enable = true
+
+# Enable concurrent snapshot writes - future feature (true/false)
+snapshot_concurrent_writes = false
+
+# Verify data integrity during snapshot load (true/false)
+snapshot_verify_checksums = true
+
+# S3 Integration Configuration
+# Enable S3 integration for cloud backup (true/false)
+s3_enable = false
+
+# S3 bucket name for storing snapshots
+s3_bucket = ""
+
+# AWS region for S3 operations
+s3_region = us-east-1
+
+# S3 prefix for all ContextDB files
+s3_prefix = contextdb/
+
+# Upload timeout in milliseconds (5 minutes default)
+s3_upload_timeout_ms = 300000
+
+# Download timeout in milliseconds (3 minutes default)
+s3_download_timeout_ms = 180000
+
+# Maximum retry attempts for S3 operations
+s3_max_retries = 3
+
+# Automatically cleanup old S3 snapshots (true/false)
+s3_cleanup_auto_enable = true
+
+# Verify S3 uploads by downloading and comparing checksums (true/false)
+s3_verify_uploads = true
+
+# Use multipart upload for files larger than this (MB)
+s3_multipart_threshold_mb = 100
+
+# Raft Consensus Configuration (Distributed Operation)
+# Enable Raft consensus for distributed operation (true/false)
+raft_enable = false
+
+# Current node ID in the cluster (must be unique)
+raft_node_id = 1
+
+# Port for Raft consensus communication
+raft_port = 8001
+
+# Minimum election timeout (milliseconds) - prevents split elections
+raft_election_timeout_min_ms = 150
+
+# Maximum election timeout (milliseconds) - randomized to prevent ties
+raft_election_timeout_max_ms = 300
+
+# Heartbeat interval for leader (milliseconds) - keep followers informed
+raft_heartbeat_interval_ms = 50
+
+# Network operation timeout (milliseconds) - TCP connection timeouts
+raft_network_timeout_ms = 30000
+
+# Batch size for log replication (entries per RPC)
+raft_log_replication_batch_size = 100
+
+# Create snapshot after N log entries (for log compaction)
+raft_snapshot_threshold = 10000
+
+# Maximum entries per AppendEntries RPC (prevents large messages)
+raft_max_append_entries = 50
+
+# Leadership transfer timeout (milliseconds)
+raft_leadership_transfer_timeout_ms = 5000
+
+# Enable pre-vote extension to prevent disruptions (true/false)
+raft_pre_vote_enable = true
+
+# Enable CRC32 checksums for network messages (true/false)
+raft_checksum_enable = true
+
+# Enable compression for large messages - future feature (true/false)
+raft_compression_enable = false
+
+# Distributed Cluster Configuration
+# How many copies of data to maintain across the cluster
+cluster_replication_factor = 3
+
+# Minimum nodes required for read operations (consistency vs availability)
+cluster_read_quorum = 2
+
+# Minimum nodes required for write operations (durability vs availability)
+cluster_write_quorum = 2
+
+# Automatically join cluster on startup (true/false)
+cluster_auto_join = true
+
+# Expected cluster size for bootstrapping (prevents premature startup)
+cluster_bootstrap_expect = 3
+
+# Time to detect node failures (milliseconds)
+cluster_failure_detection_ms = 10000
+
+# Prevent split-brain scenarios with network partitions (true/false)
+cluster_split_brain_protection = true
+
+# Future configuration sections will be added here
 # For example:
 # vector_dimension = 128
 # checkpoint_interval = 5000

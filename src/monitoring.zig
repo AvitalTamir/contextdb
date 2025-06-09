@@ -1,9 +1,38 @@
 const std = @import("std");
 const types = @import("types.zig");
+const config = @import("config.zig");
+const testing = std.testing;
 
 /// Monitoring and Metrics System for ContextDB
 /// Provides Prometheus-compatible metrics and comprehensive observability
 /// Following TigerBeetle-style programming: deterministic, high-performance, zero dependencies
+
+/// Monitoring configuration helper
+pub const MonitoringConfig = struct {
+    collection_interval_ms: u32,
+    rate_tracker_window_size: u32,
+    histogram_enable: bool,
+    export_prometheus: bool,
+    export_json: bool,
+    health_check_interval_ms: u32,
+    health_check_timeout_ms: u32,
+    memory_stats_enable: bool,
+    error_tracking_enable: bool,
+    
+    pub fn fromConfig(global_cfg: config.Config) MonitoringConfig {
+        return MonitoringConfig{
+            .collection_interval_ms = global_cfg.metrics_collection_interval_ms,
+            .rate_tracker_window_size = global_cfg.metrics_rate_tracker_window_size,
+            .histogram_enable = global_cfg.metrics_histogram_enable,
+            .export_prometheus = global_cfg.metrics_export_prometheus,
+            .export_json = global_cfg.metrics_export_json,
+            .health_check_interval_ms = global_cfg.health_check_interval_ms,
+            .health_check_timeout_ms = global_cfg.health_check_timeout_ms,
+            .memory_stats_enable = global_cfg.memory_stats_enable,
+            .error_tracking_enable = global_cfg.error_tracking_enable,
+        };
+    }
+};
 
 /// Histogram bucket configuration for latency measurements
 pub const HistogramBuckets = struct {
@@ -193,6 +222,7 @@ pub const RateTracker = struct {
 /// Comprehensive metrics collection for ContextDB
 pub const MetricsCollector = struct {
     allocator: std.mem.Allocator,
+    config: MonitoringConfig,
     
     // Operation counters
     node_inserts_total: Counter,
@@ -210,8 +240,8 @@ pub const MetricsCollector = struct {
     system_errors_total: Counter,
     
     // Latency histograms
-    insert_duration_histogram: HistogramBuckets,
-    query_duration_histogram: HistogramBuckets,
+    insert_duration_histogram: ?HistogramBuckets,
+    query_duration_histogram: ?HistogramBuckets,
     
     // Memory gauges
     memory_usage_bytes: Gauge,
@@ -232,9 +262,23 @@ pub const MetricsCollector = struct {
     startup_timestamp: i64,
     last_metrics_update: i64,
     
-    pub fn init(allocator: std.mem.Allocator) !MetricsCollector {
+    pub fn init(allocator: std.mem.Allocator, monitoring_config: ?MonitoringConfig) !MetricsCollector {
+        const cfg = monitoring_config orelse MonitoringConfig.fromConfig(config.Config{});
+        
+        // Initialize histograms only if enabled in config
+        const insert_histogram = if (cfg.histogram_enable) 
+            try HistogramBuckets.init(allocator, &HistogramBuckets.LATENCY_BUCKETS)
+        else 
+            null;
+            
+        const query_histogram = if (cfg.histogram_enable)
+            try HistogramBuckets.init(allocator, &HistogramBuckets.LATENCY_BUCKETS)
+        else
+            null;
+        
         return MetricsCollector{
             .allocator = allocator,
+            .config = cfg,
             
             // Initialize counters
             .node_inserts_total = Counter.init(),
@@ -247,9 +291,9 @@ pub const MetricsCollector = struct {
             .query_errors_total = Counter.init(),
             .system_errors_total = Counter.init(),
             
-            // Initialize histograms
-            .insert_duration_histogram = try HistogramBuckets.init(allocator, &HistogramBuckets.LATENCY_BUCKETS),
-            .query_duration_histogram = try HistogramBuckets.init(allocator, &HistogramBuckets.LATENCY_BUCKETS),
+            // Initialize histograms (optional based on config)
+            .insert_duration_histogram = insert_histogram,
+            .query_duration_histogram = query_histogram,
             
             // Initialize gauges
             .memory_usage_bytes = Gauge.init(),
@@ -260,9 +304,9 @@ pub const MetricsCollector = struct {
             .total_vectors = Gauge.init(),
             .log_entries = Gauge.init(),
             
-            // Initialize rate trackers (60 samples for 1-minute windows)
-            .insert_rate_tracker = try RateTracker.init(allocator, 60),
-            .query_rate_tracker = try RateTracker.init(allocator, 60),
+            // Initialize rate trackers with configurable window size
+            .insert_rate_tracker = try RateTracker.init(allocator, cfg.rate_tracker_window_size),
+            .query_rate_tracker = try RateTracker.init(allocator, cfg.rate_tracker_window_size),
             
             // System metrics
             .startup_timestamp = std.time.timestamp(),
@@ -271,8 +315,12 @@ pub const MetricsCollector = struct {
     }
     
     pub fn deinit(self: *MetricsCollector) void {
-        self.insert_duration_histogram.deinit();
-        self.query_duration_histogram.deinit();
+        if (self.insert_duration_histogram) |*histogram| {
+            histogram.deinit();
+        }
+        if (self.query_duration_histogram) |*histogram| {
+            histogram.deinit();
+        }
         self.insert_rate_tracker.deinit();
         self.query_rate_tracker.deinit();
     }
@@ -281,37 +329,49 @@ pub const MetricsCollector = struct {
     
     pub fn recordNodeInsert(self: *MetricsCollector, duration_us: u64) void {
         self.node_inserts_total.increment();
-        self.insert_duration_histogram.observe(@floatFromInt(duration_us));
+        if (self.insert_duration_histogram) |*histogram| {
+            histogram.observe(@floatFromInt(duration_us));
+        }
         self.insert_rate_tracker.record(1);
     }
     
     pub fn recordEdgeInsert(self: *MetricsCollector, duration_us: u64) void {
         self.edge_inserts_total.increment();
-        self.insert_duration_histogram.observe(@floatFromInt(duration_us));
+        if (self.insert_duration_histogram) |*histogram| {
+            histogram.observe(@floatFromInt(duration_us));
+        }
         self.insert_rate_tracker.record(1);
     }
     
     pub fn recordVectorInsert(self: *MetricsCollector, duration_us: u64) void {
         self.vector_inserts_total.increment();
-        self.insert_duration_histogram.observe(@floatFromInt(duration_us));
+        if (self.insert_duration_histogram) |*histogram| {
+            histogram.observe(@floatFromInt(duration_us));
+        }
         self.insert_rate_tracker.record(1);
     }
     
     pub fn recordSimilarityQuery(self: *MetricsCollector, duration_us: u64) void {
         self.similarity_queries_total.increment();
-        self.query_duration_histogram.observe(@floatFromInt(duration_us));
+        if (self.query_duration_histogram) |*histogram| {
+            histogram.observe(@floatFromInt(duration_us));
+        }
         self.query_rate_tracker.record(1);
     }
     
     pub fn recordGraphQuery(self: *MetricsCollector, duration_us: u64) void {
         self.graph_queries_total.increment();
-        self.query_duration_histogram.observe(@floatFromInt(duration_us));
+        if (self.query_duration_histogram) |*histogram| {
+            histogram.observe(@floatFromInt(duration_us));
+        }
         self.query_rate_tracker.record(1);
     }
     
     pub fn recordHybridQuery(self: *MetricsCollector, duration_us: u64) void {
         self.hybrid_queries_total.increment();
-        self.query_duration_histogram.observe(@floatFromInt(duration_us));
+        if (self.query_duration_histogram) |*histogram| {
+            histogram.observe(@floatFromInt(duration_us));
+        }
         self.query_rate_tracker.record(1);
     }
     
@@ -378,27 +438,51 @@ pub const MetricsCollector = struct {
     }
     
     pub fn getAverageInsertLatency(self: *const MetricsCollector) f64 {
-        return self.insert_duration_histogram.getMean();
+        if (self.insert_duration_histogram) |histogram| {
+            return histogram.getMean();
+        } else {
+            return 0.0;
+        }
     }
     
     pub fn getAverageQueryLatency(self: *const MetricsCollector) f64 {
-        return self.query_duration_histogram.getMean();
+        if (self.query_duration_histogram) |histogram| {
+            return histogram.getMean();
+        } else {
+            return 0.0;
+        }
     }
     
     pub fn getP95InsertLatency(self: *const MetricsCollector) f64 {
-        return self.insert_duration_histogram.getPercentile(95.0);
+        if (self.insert_duration_histogram) |histogram| {
+            return histogram.getPercentile(95.0);
+        } else {
+            return 0.0;
+        }
     }
     
     pub fn getP95QueryLatency(self: *const MetricsCollector) f64 {
-        return self.query_duration_histogram.getPercentile(95.0);
+        if (self.query_duration_histogram) |histogram| {
+            return histogram.getPercentile(95.0);
+        } else {
+            return 0.0;
+        }
     }
     
     pub fn getP99InsertLatency(self: *const MetricsCollector) f64 {
-        return self.insert_duration_histogram.getPercentile(99.0);
+        if (self.insert_duration_histogram) |histogram| {
+            return histogram.getPercentile(99.0);
+        } else {
+            return 0.0;
+        }
     }
     
     pub fn getP99QueryLatency(self: *const MetricsCollector) f64 {
-        return self.query_duration_histogram.getPercentile(99.0);
+        if (self.query_duration_histogram) |histogram| {
+            return histogram.getPercentile(99.0);
+        } else {
+            return 0.0;
+        }
     }
     
     /// Generate Prometheus-compatible metrics output
@@ -445,25 +529,29 @@ pub const MetricsCollector = struct {
         try writer.print("contextdb_system_errors_total {}\n", .{self.system_errors_total.get()});
         
         // Histogram metrics
-        try writer.print("# HELP contextdb_insert_duration_histogram_us Insert operation duration in microseconds\n", .{});
-        try writer.print("# TYPE contextdb_insert_duration_histogram_us histogram\n", .{});
-        for (self.insert_duration_histogram.buckets, 0..) |bucket, i| {
-            const le_value = if (std.math.isInf(bucket)) "+Inf" else try std.fmt.allocPrint(allocator, "{d}", .{bucket});
-            defer if (!std.math.isInf(bucket)) allocator.free(le_value);
-            try writer.print("contextdb_insert_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, self.insert_duration_histogram.counts[i] });
+        if (self.insert_duration_histogram) |histogram| {
+            try writer.print("# HELP contextdb_insert_duration_histogram_us Insert operation duration in microseconds\n", .{});
+            try writer.print("# TYPE contextdb_insert_duration_histogram_us histogram\n", .{});
+            for (histogram.buckets, 0..) |bucket, i| {
+                const le_value = if (std.math.isInf(bucket)) "+Inf" else try std.fmt.allocPrint(allocator, "{d}", .{bucket});
+                defer if (!std.math.isInf(bucket)) allocator.free(le_value);
+                try writer.print("contextdb_insert_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, histogram.counts[i] });
+            }
+            try writer.print("contextdb_insert_duration_histogram_us_count {}\n", .{histogram.total_count});
+            try writer.print("contextdb_insert_duration_histogram_us_sum {d}\n", .{histogram.total_sum});
         }
-        try writer.print("contextdb_insert_duration_histogram_us_count {}\n", .{self.insert_duration_histogram.total_count});
-        try writer.print("contextdb_insert_duration_histogram_us_sum {d}\n", .{self.insert_duration_histogram.total_sum});
         
-        try writer.print("# HELP contextdb_query_duration_histogram_us Query operation duration in microseconds\n", .{});
-        try writer.print("# TYPE contextdb_query_duration_histogram_us histogram\n", .{});
-        for (self.query_duration_histogram.buckets, 0..) |bucket, i| {
-            const le_value = if (std.math.isInf(bucket)) "+Inf" else try std.fmt.allocPrint(allocator, "{d}", .{bucket});
-            defer if (!std.math.isInf(bucket)) allocator.free(le_value);
-            try writer.print("contextdb_query_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, self.query_duration_histogram.counts[i] });
+        if (self.query_duration_histogram) |histogram| {
+            try writer.print("# HELP contextdb_query_duration_histogram_us Query operation duration in microseconds\n", .{});
+            try writer.print("# TYPE contextdb_query_duration_histogram_us histogram\n", .{});
+            for (histogram.buckets, 0..) |bucket, i| {
+                const le_value = if (std.math.isInf(bucket)) "+Inf" else try std.fmt.allocPrint(allocator, "{d}", .{bucket});
+                defer if (!std.math.isInf(bucket)) allocator.free(le_value);
+                try writer.print("contextdb_query_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, histogram.counts[i] });
+            }
+            try writer.print("contextdb_query_duration_histogram_us_count {}\n", .{histogram.total_count});
+            try writer.print("contextdb_query_duration_histogram_us_sum {d}\n", .{histogram.total_sum});
         }
-        try writer.print("contextdb_query_duration_histogram_us_count {}\n", .{self.query_duration_histogram.total_count});
-        try writer.print("contextdb_query_duration_histogram_us_sum {d}\n", .{self.query_duration_histogram.total_sum});
         
         // Gauge metrics
         try writer.print("# HELP contextdb_memory_usage_bytes Current memory usage in bytes\n", .{});
@@ -583,8 +671,12 @@ pub const MetricsCollector = struct {
         self.system_errors_total.reset();
         
         // Reset histograms
-        self.insert_duration_histogram.reset();
-        self.query_duration_histogram.reset();
+        if (self.insert_duration_histogram) |*histogram| {
+            histogram.reset();
+        }
+        if (self.query_duration_histogram) |*histogram| {
+            histogram.reset();
+        }
         
         // Reset system metrics
         self.startup_timestamp = std.time.timestamp();
@@ -679,4 +771,142 @@ pub const HealthCheck = struct {
         
         return try output.toOwnedSlice();
     }
-}; 
+};
+
+test "MonitoringConfig from global config" {
+    const global_config = config.Config{
+        .metrics_collection_interval_ms = 2000,
+        .metrics_rate_tracker_window_size = 120,
+        .metrics_histogram_enable = false,
+        .metrics_export_prometheus = true,
+        .metrics_export_json = false,
+        .health_check_interval_ms = 10000,
+        .health_check_timeout_ms = 2000,
+        .memory_stats_enable = false,
+        .error_tracking_enable = true,
+    };
+    
+    const monitoring_config = MonitoringConfig.fromConfig(global_config);
+    
+    try testing.expect(monitoring_config.collection_interval_ms == 2000);
+    try testing.expect(monitoring_config.rate_tracker_window_size == 120);
+    try testing.expect(monitoring_config.histogram_enable == false);
+    try testing.expect(monitoring_config.export_prometheus == true);
+    try testing.expect(monitoring_config.export_json == false);
+    try testing.expect(monitoring_config.health_check_interval_ms == 10000);
+    try testing.expect(monitoring_config.health_check_timeout_ms == 2000);
+    try testing.expect(monitoring_config.memory_stats_enable == false);
+    try testing.expect(monitoring_config.error_tracking_enable == true);
+}
+
+test "MetricsCollector with custom configuration" {
+    const allocator = testing.allocator;
+    
+    const monitoring_config = MonitoringConfig{
+        .collection_interval_ms = 3000,
+        .rate_tracker_window_size = 30,
+        .histogram_enable = false, // Disable histograms
+        .export_prometheus = true,
+        .export_json = true,
+        .health_check_interval_ms = 15000,
+        .health_check_timeout_ms = 3000,
+        .memory_stats_enable = true,
+        .error_tracking_enable = false,
+    };
+    
+    var metrics = try MetricsCollector.init(allocator, monitoring_config);
+    defer metrics.deinit();
+    
+    // Verify configuration is applied
+    try testing.expect(metrics.config.collection_interval_ms == 3000);
+    try testing.expect(metrics.config.rate_tracker_window_size == 30);
+    try testing.expect(metrics.config.histogram_enable == false);
+    
+    // Verify histograms are disabled
+    try testing.expect(metrics.insert_duration_histogram == null);
+    try testing.expect(metrics.query_duration_histogram == null);
+    
+    // Test that recording operations work without histograms
+    metrics.recordNodeInsert(100);
+    metrics.recordSimilarityQuery(500);
+    
+    try testing.expect(metrics.node_inserts_total.get() == 1);
+    try testing.expect(metrics.similarity_queries_total.get() == 1);
+    
+    // Latency methods should return 0.0 when histograms disabled
+    try testing.expect(metrics.getAverageInsertLatency() == 0.0);
+    try testing.expect(metrics.getAverageQueryLatency() == 0.0);
+    try testing.expect(metrics.getP95InsertLatency() == 0.0);
+    try testing.expect(metrics.getP99QueryLatency() == 0.0);
+}
+
+test "MetricsCollector with default configuration" {
+    const allocator = testing.allocator;
+    
+    var metrics = try MetricsCollector.init(allocator, null);
+    defer metrics.deinit();
+    
+    // Verify default values are applied
+    try testing.expect(metrics.config.collection_interval_ms == 1000);
+    try testing.expect(metrics.config.rate_tracker_window_size == 60);
+    try testing.expect(metrics.config.histogram_enable == true);
+    try testing.expect(metrics.config.export_prometheus == true);
+    try testing.expect(metrics.config.export_json == true);
+    
+    // Verify histograms are enabled by default
+    try testing.expect(metrics.insert_duration_histogram != null);
+    try testing.expect(metrics.query_duration_histogram != null);
+    
+    // Test histogram functionality
+    metrics.recordNodeInsert(100);
+    
+    try testing.expect(metrics.getAverageInsertLatency() > 0.0);
+}
+
+test "Monitoring configuration integration with global config" {
+    const allocator = testing.allocator;
+    
+    // Create a comprehensive global config
+    const global_config = config.Config{
+        .metrics_collection_interval_ms = 1500,
+        .metrics_rate_tracker_window_size = 90,
+        .metrics_histogram_enable = true,
+        .metrics_export_prometheus = false,
+        .metrics_export_json = true,
+        .health_check_interval_ms = 3000,
+        .health_check_timeout_ms = 500,
+        .memory_stats_enable = false,
+        .error_tracking_enable = true,
+    };
+    
+    // Test MonitoringConfig.fromConfig
+    const monitoring_cfg = MonitoringConfig.fromConfig(global_config);
+    try testing.expect(monitoring_cfg.collection_interval_ms == 1500);
+    try testing.expect(monitoring_cfg.rate_tracker_window_size == 90);
+    try testing.expect(monitoring_cfg.histogram_enable == true);
+    try testing.expect(monitoring_cfg.export_prometheus == false);
+    try testing.expect(monitoring_cfg.export_json == true);
+    try testing.expect(monitoring_cfg.health_check_interval_ms == 3000);
+    try testing.expect(monitoring_cfg.health_check_timeout_ms == 500);
+    try testing.expect(monitoring_cfg.memory_stats_enable == false);
+    try testing.expect(monitoring_cfg.error_tracking_enable == true);
+    
+    // Test MetricsCollector with the config
+    var metrics = try MetricsCollector.init(allocator, monitoring_cfg);
+    defer metrics.deinit();
+    
+    // Verify integration works end-to-end
+    try testing.expect(metrics.config.collection_interval_ms == 1500);
+    try testing.expect(metrics.config.rate_tracker_window_size == 90);
+    try testing.expect(metrics.insert_duration_histogram != null); // Histograms enabled
+    try testing.expect(metrics.query_duration_histogram != null);
+    
+    // Test functionality with real monitoring operations
+    metrics.recordNodeInsert(150);
+    metrics.recordGraphQuery(300);
+    
+    try testing.expect(metrics.node_inserts_total.get() == 1);
+    try testing.expect(metrics.graph_queries_total.get() == 1);
+    try testing.expect(metrics.getAverageInsertLatency() > 0.0);
+    try testing.expect(metrics.getAverageQueryLatency() > 0.0);
+} 

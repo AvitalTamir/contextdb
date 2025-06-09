@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const config = @import("config.zig");
+
 /// Raft Consensus Implementation for ContextDB
 /// Following the Raft paper: "In Search of an Understandable Consensus Algorithm"
 /// Designed for TigerBeetle-style deterministic operation
@@ -168,6 +170,7 @@ pub const RaftNode = struct {
     allocator: std.mem.Allocator,
     node_id: u64,
     cluster_config: ClusterConfig,
+    config: RaftConfig,
     
     // State
     state: NodeState = .follower,
@@ -187,7 +190,25 @@ pub const RaftNode = struct {
     // Network (placeholder for now)
     network: ?*NetworkLayer = null,
     
-    pub fn init(allocator: std.mem.Allocator, node_id: u64, cluster_config: ClusterConfig, data_path: []const u8) !RaftNode {
+    pub fn init(allocator: std.mem.Allocator, node_id: u64, cluster_config: ClusterConfig, data_path: []const u8, raft_config: ?RaftConfig) !RaftNode {
+        // Use provided config or defaults
+        const config_to_use = raft_config orelse RaftConfig{
+            .enable = false,
+            .node_id = node_id,
+            .port = 8001,
+            .election_timeout_min_ms = 150,
+            .election_timeout_max_ms = 300,
+            .heartbeat_interval_ms = 50,
+            .network_timeout_ms = 30000,
+            .log_replication_batch_size = 100,
+            .snapshot_threshold = 10000,
+            .max_append_entries = 50,
+            .leadership_transfer_timeout_ms = 5000,
+            .pre_vote_enable = true,
+            .checksum_enable = true,
+            .compression_enable = false,
+        };
+
         const state_path = try std.fs.path.join(allocator, &[_][]const u8{ data_path, "raft_state.bin" });
         defer allocator.free(state_path);
         
@@ -197,9 +218,12 @@ pub const RaftNode = struct {
             .allocator = allocator,
             .node_id = node_id,
             .cluster_config = cluster_config,
+            .config = config_to_use,
             .persistent_state = persistent,
             .log_entries = std.ArrayList(LogEntry).init(allocator),
             .log_data = std.ArrayList(u8).init(allocator),
+            .election_timeout_ms = config_to_use.election_timeout_min_ms,
+            .heartbeat_interval_ms = config_to_use.heartbeat_interval_ms,
         };
     }
     
@@ -410,8 +434,12 @@ pub const RaftNode = struct {
     }
     
     pub fn resetElectionTimeout(self: *RaftNode) void {
-        const random_offset = @as(u64, @intCast(std.crypto.random.int(u16))) % 150; // 0-150ms
-        self.election_deadline = @as(u64, @intCast(std.time.milliTimestamp())) + self.election_timeout_ms + random_offset;
+        // Calculate random timeout between min and max range
+        const timeout_range = self.config.election_timeout_max_ms - self.config.election_timeout_min_ms;
+        const random_offset = @as(u64, @intCast(std.crypto.random.int(u16))) % timeout_range;
+        const timeout_ms = self.config.election_timeout_min_ms + @as(u32, @intCast(random_offset));
+        
+        self.election_deadline = @as(u64, @intCast(std.time.milliTimestamp())) + timeout_ms;
     }
     
     pub fn getLastLogIndex(self: *const RaftNode) u64 {
@@ -486,4 +514,220 @@ pub const NetworkLayer = struct {
 fn calculateChecksum(data: []const u8) u32 {
     const Crc32 = std.hash.Crc32;
     return Crc32.hash(data);
+}
+
+/// Raft configuration helper
+pub const RaftConfig = struct {
+    enable: bool,
+    node_id: u64,
+    port: u16,
+    election_timeout_min_ms: u32,
+    election_timeout_max_ms: u32,
+    heartbeat_interval_ms: u32,
+    network_timeout_ms: u32,
+    log_replication_batch_size: u32,
+    snapshot_threshold: u32,
+    max_append_entries: u32,
+    leadership_transfer_timeout_ms: u32,
+    pre_vote_enable: bool,
+    checksum_enable: bool,
+    compression_enable: bool,
+    
+    pub fn fromConfig(global_cfg: config.Config) RaftConfig {
+        return RaftConfig{
+            .enable = global_cfg.raft_enable,
+            .node_id = global_cfg.raft_node_id,
+            .port = global_cfg.raft_port,
+            .election_timeout_min_ms = global_cfg.raft_election_timeout_min_ms,
+            .election_timeout_max_ms = global_cfg.raft_election_timeout_max_ms,
+            .heartbeat_interval_ms = global_cfg.raft_heartbeat_interval_ms,
+            .network_timeout_ms = global_cfg.raft_network_timeout_ms,
+            .log_replication_batch_size = global_cfg.raft_log_replication_batch_size,
+            .snapshot_threshold = global_cfg.raft_snapshot_threshold,
+            .max_append_entries = global_cfg.raft_max_append_entries,
+            .leadership_transfer_timeout_ms = global_cfg.raft_leadership_transfer_timeout_ms,
+            .pre_vote_enable = global_cfg.raft_pre_vote_enable,
+            .checksum_enable = global_cfg.raft_checksum_enable,
+            .compression_enable = global_cfg.raft_compression_enable,
+        };
+    }
+};
+
+test "RaftConfig from global config" {
+    const global_config = config.Config{
+        .raft_enable = true,
+        .raft_node_id = 3,
+        .raft_port = 8003,
+        .raft_election_timeout_min_ms = 250,
+        .raft_election_timeout_max_ms = 500,
+        .raft_heartbeat_interval_ms = 100,
+        .raft_network_timeout_ms = 60000,
+        .raft_log_replication_batch_size = 150,
+        .raft_snapshot_threshold = 25000,
+        .raft_max_append_entries = 75,
+        .raft_leadership_transfer_timeout_ms = 10000,
+        .raft_pre_vote_enable = false,
+        .raft_checksum_enable = false,
+        .raft_compression_enable = true,
+    };
+    
+    const raft_cfg = RaftConfig.fromConfig(global_config);
+    try std.testing.expect(raft_cfg.enable == true);
+    try std.testing.expect(raft_cfg.node_id == 3);
+    try std.testing.expect(raft_cfg.port == 8003);
+    try std.testing.expect(raft_cfg.election_timeout_min_ms == 250);
+    try std.testing.expect(raft_cfg.election_timeout_max_ms == 500);
+    try std.testing.expect(raft_cfg.heartbeat_interval_ms == 100);
+    try std.testing.expect(raft_cfg.network_timeout_ms == 60000);
+    try std.testing.expect(raft_cfg.log_replication_batch_size == 150);
+    try std.testing.expect(raft_cfg.snapshot_threshold == 25000);
+    try std.testing.expect(raft_cfg.max_append_entries == 75);
+    try std.testing.expect(raft_cfg.leadership_transfer_timeout_ms == 10000);
+    try std.testing.expect(raft_cfg.pre_vote_enable == false);
+    try std.testing.expect(raft_cfg.checksum_enable == false);
+    try std.testing.expect(raft_cfg.compression_enable == true);
+}
+
+test "RaftNode with custom configuration" {
+    const allocator = std.testing.allocator;
+    
+    // Clean up test data
+    std.fs.cwd().deleteTree("test_raft_config") catch {};
+    defer std.fs.cwd().deleteTree("test_raft_config") catch {};
+    
+    try std.fs.cwd().makeDir("test_raft_config");
+    
+    const node_infos = [_]ClusterConfig.NodeInfo{
+        .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
+        .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
+    };
+    
+    const cluster_config = ClusterConfig{ .nodes = &node_infos };
+    
+    // Create custom Raft config
+    const raft_config = RaftConfig{
+        .enable = true,
+        .node_id = 1,
+        .port = 8001,
+        .election_timeout_min_ms = 200,
+        .election_timeout_max_ms = 400,
+        .heartbeat_interval_ms = 75,
+        .network_timeout_ms = 45000,
+        .log_replication_batch_size = 150,
+        .snapshot_threshold = 15000,
+        .max_append_entries = 75,
+        .leadership_transfer_timeout_ms = 8000,
+        .pre_vote_enable = true,
+        .checksum_enable = true,
+        .compression_enable = false,
+    };
+    
+    var raft_node = try RaftNode.init(allocator, 1, cluster_config, "test_raft_config", raft_config);
+    defer raft_node.deinit();
+    
+    // Verify configuration was applied
+    try std.testing.expect(raft_node.config.enable == true);
+    try std.testing.expect(raft_node.config.node_id == 1);
+    try std.testing.expect(raft_node.config.port == 8001);
+    try std.testing.expect(raft_node.config.election_timeout_min_ms == 200);
+    try std.testing.expect(raft_node.config.election_timeout_max_ms == 400);
+    try std.testing.expect(raft_node.config.heartbeat_interval_ms == 75);
+    try std.testing.expect(raft_node.config.network_timeout_ms == 45000);
+    try std.testing.expect(raft_node.config.snapshot_threshold == 15000);
+    try std.testing.expect(raft_node.config.pre_vote_enable == true);
+    try std.testing.expect(raft_node.config.compression_enable == false);
+    
+    // Verify timing configuration was applied
+    try std.testing.expect(raft_node.heartbeat_interval_ms == 75);
+    try std.testing.expect(raft_node.election_timeout_ms == 200); // Min value
+}
+
+test "RaftNode with default configuration" {
+    const allocator = std.testing.allocator;
+    
+    // Clean up test data
+    std.fs.cwd().deleteTree("test_raft_default") catch {};
+    defer std.fs.cwd().deleteTree("test_raft_default") catch {};
+    
+    try std.fs.cwd().makeDir("test_raft_default");
+    
+    const node_infos = [_]ClusterConfig.NodeInfo{
+        .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
+    };
+    
+    const cluster_config = ClusterConfig{ .nodes = &node_infos };
+    
+    var raft_node = try RaftNode.init(allocator, 1, cluster_config, "test_raft_default", null);
+    defer raft_node.deinit();
+    
+    // Verify default configuration
+    try std.testing.expect(raft_node.config.enable == false);
+    try std.testing.expect(raft_node.config.node_id == 1);
+    try std.testing.expect(raft_node.config.port == 8001);
+    try std.testing.expect(raft_node.config.election_timeout_min_ms == 150);
+    try std.testing.expect(raft_node.config.election_timeout_max_ms == 300);
+    try std.testing.expect(raft_node.config.heartbeat_interval_ms == 50);
+    try std.testing.expect(raft_node.config.network_timeout_ms == 30000);
+    try std.testing.expect(raft_node.config.snapshot_threshold == 10000);
+    try std.testing.expect(raft_node.config.pre_vote_enable == true);
+    try std.testing.expect(raft_node.config.checksum_enable == true);
+    try std.testing.expect(raft_node.config.compression_enable == false);
+}
+
+test "Raft configuration integration test" {
+    const allocator = std.testing.allocator;
+    
+    // Clean up test data
+    std.fs.cwd().deleteTree("test_raft_integration") catch {};
+    defer std.fs.cwd().deleteTree("test_raft_integration") catch {};
+    
+    try std.fs.cwd().makeDir("test_raft_integration");
+    
+    // Create a comprehensive global config
+    const global_config = config.Config{
+        .raft_enable = true,
+        .raft_node_id = 2,
+        .raft_port = 8002,
+        .raft_election_timeout_min_ms = 180,
+        .raft_election_timeout_max_ms = 350,
+        .raft_heartbeat_interval_ms = 60,
+        .raft_network_timeout_ms = 40000,
+        .raft_log_replication_batch_size = 120,
+        .raft_snapshot_threshold = 12000,
+        .raft_max_append_entries = 60,
+        .raft_leadership_transfer_timeout_ms = 6000,
+        .raft_pre_vote_enable = true,
+        .raft_checksum_enable = true,
+        .raft_compression_enable = false,
+    };
+    
+    // Test RaftConfig.fromConfig
+    const raft_cfg = RaftConfig.fromConfig(global_config);
+    try std.testing.expect(raft_cfg.enable == true);
+    try std.testing.expect(raft_cfg.node_id == 2);
+    try std.testing.expect(raft_cfg.port == 8002);
+    try std.testing.expect(raft_cfg.election_timeout_min_ms == 180);
+    try std.testing.expect(raft_cfg.election_timeout_max_ms == 350);
+    try std.testing.expect(raft_cfg.heartbeat_interval_ms == 60);
+    
+    // Test RaftNode with the config
+    const node_infos = [_]ClusterConfig.NodeInfo{
+        .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
+        .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
+    };
+    
+    const cluster_config = ClusterConfig{ .nodes = &node_infos };
+    
+    var raft_node = try RaftNode.init(allocator, 2, cluster_config, "test_raft_integration", raft_cfg);
+    defer raft_node.deinit();
+    
+    // Verify integration works end-to-end
+    try std.testing.expect(raft_node.config.enable == true);
+    try std.testing.expect(raft_node.config.node_id == 2);
+    try std.testing.expect(raft_node.config.election_timeout_min_ms == 180);
+    try std.testing.expect(raft_node.config.election_timeout_max_ms == 350);
+    try std.testing.expect(raft_node.config.heartbeat_interval_ms == 60);
+    try std.testing.expect(raft_node.heartbeat_interval_ms == 60);
+    
+    std.debug.print("✓ Raft configuration integration test passed\n", .{});
 } 

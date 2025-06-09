@@ -138,7 +138,7 @@ test "PersistentIndexManager full integration" {
     // Create the parent directory first
     try std.fs.cwd().makeDir("test_persistent_integration");
     
-    var manager = try persistent_index.PersistentIndexManager.init(allocator, "test_persistent_integration");
+    var manager = try persistent_index.PersistentIndexManager.init(allocator, "test_persistent_integration", null);
     defer manager.deinit();
     
     // Initially no indexes should exist
@@ -232,7 +232,7 @@ test "Large dataset persistence performance" {
     // Create the parent directory first
     try std.fs.cwd().makeDir("test_performance");
     
-    var manager = try persistent_index.PersistentIndexManager.init(allocator, "test_performance");
+    var manager = try persistent_index.PersistentIndexManager.init(allocator, "test_performance", null);
     defer manager.deinit();
     
     // Create large dataset
@@ -334,7 +334,7 @@ test "File header validation and magic numbers" {
     try node_index.create(&test_nodes);
     
     // Manually inspect the header
-    const mapped_file = try persistent_index.MappedFile.initReadOnly(allocator, "test_header/nodes.idx");
+    const mapped_file = try persistent_index.MappedFile.initReadOnly(allocator, "test_header/nodes.idx", 16384);
     defer {
         var mutable_file = mapped_file;
         mutable_file.deinit();
@@ -396,7 +396,7 @@ test "Memory-mapped file size and alignment" {
     try testing.expect(file_size == expected_size);
     
     // Verify alignment requirements
-    const mapped_file = try persistent_index.MappedFile.initReadOnly(allocator, "test_alignment/vectors.idx");
+    const mapped_file = try persistent_index.MappedFile.initReadOnly(allocator, "test_alignment/vectors.idx", 16384);
     defer {
         var mutable_file = mapped_file;
         mutable_file.deinit();

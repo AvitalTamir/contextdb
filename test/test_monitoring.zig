@@ -85,7 +85,7 @@ test "RateTracker functionality" {
 test "MetricsCollector comprehensive test" {
     const allocator = testing.allocator;
     
-    var metrics = try monitoring.MetricsCollector.init(allocator);
+    var metrics = try monitoring.MetricsCollector.init(allocator, null);
     defer metrics.deinit();
     
     // Test operation recording
@@ -169,7 +169,7 @@ test "MetricsCollector comprehensive test" {
 test "MetricsCollector JSON export" {
     const allocator = testing.allocator;
     
-    var metrics = try monitoring.MetricsCollector.init(allocator);
+    var metrics = try monitoring.MetricsCollector.init(allocator, null);
     defer metrics.deinit();
     
     // Add some test data
@@ -206,7 +206,7 @@ test "MetricsCollector JSON export" {
 test "MetricsCollector Prometheus export" {
     const allocator = testing.allocator;
     
-    var metrics = try monitoring.MetricsCollector.init(allocator);
+    var metrics = try monitoring.MetricsCollector.init(allocator, null);
     defer metrics.deinit();
     
     // Add some test data
@@ -327,8 +327,8 @@ test "ContextDB metrics integration" {
     try testing.expect(db.metrics.total_vectors.get() == @as(i64, @intCast(stats.vector_count)));
     
     // Test that latency histograms have data
-    try testing.expect(db.metrics.insert_duration_histogram.total_count == 3); // 3 insert operations
-    try testing.expect(db.metrics.query_duration_histogram.total_count == 2);  // 2 query operations
+    try testing.expect(db.metrics.insert_duration_histogram.?.total_count == 3); // 3 insert operations
+    try testing.expect(db.metrics.query_duration_histogram.?.total_count == 2);  // 2 query operations
     
     // Test JSON export with real data
     const json = try db.metrics.exportJsonMetrics(allocator);
@@ -342,7 +342,7 @@ test "ContextDB metrics integration" {
 test "Metrics reset functionality" {
     const allocator = testing.allocator;
     
-    var metrics = try monitoring.MetricsCollector.init(allocator);
+    var metrics = try monitoring.MetricsCollector.init(allocator, null);
     defer metrics.deinit();
     
     // Add some data
@@ -353,8 +353,8 @@ test "Metrics reset functionality" {
     // Verify data exists
     try testing.expect(metrics.node_inserts_total.get() == 1);
     try testing.expect(metrics.similarity_queries_total.get() == 1);
-    try testing.expect(metrics.insert_duration_histogram.total_count == 1);
-    try testing.expect(metrics.query_duration_histogram.total_count == 1);
+    try testing.expect(metrics.insert_duration_histogram.?.total_count == 1);
+    try testing.expect(metrics.query_duration_histogram.?.total_count == 1);
     
     // Reset
     metrics.reset();
@@ -362,8 +362,8 @@ test "Metrics reset functionality" {
     // Verify reset
     try testing.expect(metrics.node_inserts_total.get() == 0);
     try testing.expect(metrics.similarity_queries_total.get() == 0);
-    try testing.expect(metrics.insert_duration_histogram.total_count == 0);
-    try testing.expect(metrics.query_duration_histogram.total_count == 0);
+    try testing.expect(metrics.insert_duration_histogram.?.total_count == 0);
+    try testing.expect(metrics.query_duration_histogram.?.total_count == 0);
     
     // Note: Gauges are not reset as they represent current state
     try testing.expect(metrics.memory_usage_bytes.get() == 1_000_000);

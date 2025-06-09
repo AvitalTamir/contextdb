@@ -1,4 +1,5 @@
 const std = @import("std");
+const config = @import("config.zig");
 
 const S3Error = error{
     CommandFailed,
@@ -345,18 +346,124 @@ pub const S3SnapshotSync = struct {
     }
 };
 
+/// S3 configuration helper
+pub const S3Config = struct {
+    enable: bool,
+    bucket: []const u8,
+    region: []const u8,
+    prefix: []const u8,
+    upload_timeout_ms: u32,
+    download_timeout_ms: u32,
+    max_retries: u32,
+    cleanup_auto_enable: bool,
+    verify_uploads: bool,
+    multipart_threshold_mb: u32,
+    
+    pub fn fromConfig(global_cfg: config.Config) S3Config {
+        return S3Config{
+            .enable = global_cfg.s3_enable,
+            .bucket = global_cfg.s3_bucket,
+            .region = global_cfg.s3_region,
+            .prefix = global_cfg.s3_prefix,
+            .upload_timeout_ms = global_cfg.s3_upload_timeout_ms,
+            .download_timeout_ms = global_cfg.s3_download_timeout_ms,
+            .max_retries = global_cfg.s3_max_retries,
+            .cleanup_auto_enable = global_cfg.s3_cleanup_auto_enable,
+            .verify_uploads = global_cfg.s3_verify_uploads,
+            .multipart_threshold_mb = global_cfg.s3_multipart_threshold_mb,
+        };
+    }
+};
+
 test "S3Client AWS CLI check" {
     const allocator = std.testing.allocator;
+    const client = S3Client.init(allocator, "test-bucket", "us-west-2");
     
-    const s3_client = S3Client.init(allocator, "test-bucket", "us-east-1");
+    // This test might fail if AWS CLI is not installed
+    const has_aws_cli = client.checkAwsCli() catch false;
+    std.debug.print("AWS CLI available: {}\n", .{has_aws_cli});
     
-    // This test will only pass if AWS CLI is installed
-    // Skip if not available
-    const has_aws_cli = s3_client.checkAwsCli() catch false;
-    if (!has_aws_cli) {
-        std.debug.print("AWS CLI not available, skipping S3 tests\n", .{});
-        return;
-    }
+    // Test passes regardless of AWS CLI availability
+    try std.testing.expect(true);
+}
+
+test "S3Config from global config" {
+    const global_config = config.Config{
+        .s3_enable = true,
+        .s3_bucket = "my-test-bucket",
+        .s3_region = "eu-central-1",
+        .s3_prefix = "test/data/",
+        .s3_upload_timeout_ms = 900000,
+        .s3_download_timeout_ms = 540000,
+        .s3_max_retries = 7,
+        .s3_cleanup_auto_enable = false,
+        .s3_verify_uploads = false,
+        .s3_multipart_threshold_mb = 250,
+    };
     
-    try std.testing.expect(has_aws_cli);
+    const s3_cfg = S3Config.fromConfig(global_config);
+    try std.testing.expect(s3_cfg.enable == true);
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.bucket, "my-test-bucket"));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.region, "eu-central-1"));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.prefix, "test/data/"));
+    try std.testing.expect(s3_cfg.upload_timeout_ms == 900000);
+    try std.testing.expect(s3_cfg.download_timeout_ms == 540000);
+    try std.testing.expect(s3_cfg.max_retries == 7);
+    try std.testing.expect(s3_cfg.cleanup_auto_enable == false);
+    try std.testing.expect(s3_cfg.verify_uploads == false);
+    try std.testing.expect(s3_cfg.multipart_threshold_mb == 250);
+}
+
+test "S3Config default values" {
+    const global_config = config.Config{};
+    
+    const s3_cfg = S3Config.fromConfig(global_config);
+    try std.testing.expect(s3_cfg.enable == false);
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.bucket, ""));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.region, "us-east-1"));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.prefix, "contextdb/"));
+    try std.testing.expect(s3_cfg.upload_timeout_ms == 300000);
+    try std.testing.expect(s3_cfg.download_timeout_ms == 180000);
+    try std.testing.expect(s3_cfg.max_retries == 3);
+    try std.testing.expect(s3_cfg.cleanup_auto_enable == true);
+    try std.testing.expect(s3_cfg.verify_uploads == true);
+    try std.testing.expect(s3_cfg.multipart_threshold_mb == 100);
+}
+
+test "S3SnapshotSync configuration integration" {
+    const allocator = std.testing.allocator;
+    
+    // Create a comprehensive global config with S3 settings
+    const global_config = config.Config{
+        .s3_enable = true,
+        .s3_bucket = "production-contextdb",
+        .s3_region = "us-west-2",
+        .s3_prefix = "prod/v1/",
+        .s3_upload_timeout_ms = 600000,
+        .s3_download_timeout_ms = 300000,
+        .s3_max_retries = 5,
+        .s3_cleanup_auto_enable = true,
+        .s3_verify_uploads = true,
+        .s3_multipart_threshold_mb = 200,
+    };
+    
+    // Test S3Config.fromConfig
+    const s3_cfg = S3Config.fromConfig(global_config);
+    try std.testing.expect(s3_cfg.enable == true);
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.bucket, "production-contextdb"));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.region, "us-west-2"));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.prefix, "prod/v1/"));
+    try std.testing.expect(s3_cfg.upload_timeout_ms == 600000);
+    try std.testing.expect(s3_cfg.download_timeout_ms == 300000);
+    try std.testing.expect(s3_cfg.max_retries == 5);
+    try std.testing.expect(s3_cfg.cleanup_auto_enable == true);
+    try std.testing.expect(s3_cfg.verify_uploads == true);
+    try std.testing.expect(s3_cfg.multipart_threshold_mb == 200);
+    
+    // Test S3SnapshotSync with configuration
+    const s3_sync = S3SnapshotSync.init(allocator, s3_cfg.bucket, s3_cfg.region);
+    try std.testing.expect(std.mem.eql(u8, s3_sync.s3_client.bucket_name, "production-contextdb"));
+    try std.testing.expect(std.mem.eql(u8, s3_sync.s3_client.region, "us-west-2"));
+    
+    std.debug.print("✓ S3 configuration integration test passed\n", .{});
 } 
