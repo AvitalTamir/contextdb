@@ -2,6 +2,8 @@ const std = @import("std");
 
 // Export modules for external use
 pub const types = @import("types.zig");
+pub const memory_types = @import("memory_types.zig");
+pub const memory_manager = @import("memory_manager.zig");
 pub const log = @import("log.zig");
 pub const graph = @import("graph.zig");
 pub const vector = @import("vector.zig");

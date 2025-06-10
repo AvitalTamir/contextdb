@@ -1,8 +1,18 @@
 const std = @import("std");
 const main = @import("main.zig");
 const types = @import("types.zig");
+const memory_types = @import("memory_types.zig");
+const memory_manager = @import("memory_manager.zig");
 
 const Memora = main.Memora;
+const MemoryManager = memory_manager.MemoryManager;
+const Memory = memory_types.Memory;
+const MemoryType = memory_types.MemoryType;
+const MemoryConfidence = memory_types.MemoryConfidence;
+const MemoryImportance = memory_types.MemoryImportance;
+const MemorySource = memory_types.MemorySource;
+const MemoryQuery = memory_types.MemoryQuery;
+const MemoryRelationType = memory_types.MemoryRelationType;
 
 /// JSON-RPC 2.0 error codes
 pub const JsonRpcError = struct {
@@ -125,6 +135,7 @@ pub const McpPromptArgument = struct {
 pub const McpServer = struct {
     allocator: std.mem.Allocator,
     db: *Memora,
+    memory_manager: MemoryManager,
     port: u16,
     server_info: McpImplementation,
     capabilities: McpCapabilities,
@@ -135,10 +146,11 @@ pub const McpServer = struct {
         return Self{
             .allocator = allocator,
             .db = db,
+            .memory_manager = MemoryManager.init(allocator, db),
             .port = port,
             .server_info = McpImplementation{
                 .name = "memora",
-                .version = "1.0.0",
+                .version = "2.0.0", // Updated for LLM Memory Data Models
             },
             .capabilities = McpCapabilities{
                 .resources = McpResourcesCapability{
@@ -154,6 +166,10 @@ pub const McpServer = struct {
                 .logging = McpLoggingCapability{},
             },
         };
+    }
+    
+    pub fn deinit(self: *Self) void {
+        self.memory_manager.deinit();
     }
     
     /// Start the MCP server using stdio transport
@@ -328,16 +344,44 @@ pub const McpServer = struct {
             \\{
             \\  "type": "object",
             \\  "properties": {
-            \\    "id": {
-            \\      "type": "integer",
-            \\      "description": "Unique identifier for the memory"
-            \\    },
-            \\    "label": {
+            \\    "memory_type": {
             \\      "type": "string",
-            \\      "description": "Label describing the memory content"
+            \\      "enum": ["experience", "concept", "fact", "decision", "observation", "preference", "context", "skill", "intention", "emotion"],
+            \\      "description": "Type of memory being stored",
+            \\      "default": "experience"
+            \\    },
+            \\    "content": {
+            \\      "type": "string",
+            \\      "description": "The memory content to store"
+            \\    },
+            \\    "confidence": {
+            \\      "type": "string",
+            \\      "enum": ["very_low", "low", "medium", "high", "very_high"],
+            \\      "description": "Confidence level in this memory",
+            \\      "default": "medium"
+            \\    },
+            \\    "importance": {
+            \\      "type": "string",
+            \\      "enum": ["trivial", "low", "medium", "high", "critical"],
+            \\      "description": "Importance level of this memory",
+            \\      "default": "medium"
+            \\    },
+            \\    "source": {
+            \\      "type": "string",
+            \\      "enum": ["user_input", "llm_inference", "system_observation", "external_api", "computed"],
+            \\      "description": "Source of this memory",
+            \\      "default": "user_input"
+            \\    },
+            \\    "session_id": {
+            \\      "type": "integer",
+            \\      "description": "Session ID to associate with this memory (optional)"
+            \\    },
+            \\    "user_id": {
+            \\      "type": "integer",
+            \\      "description": "User ID to associate with this memory (optional)"
             \\    }
             \\  },
-            \\  "required": ["id", "label"]
+            \\  "required": ["content"]
             \\}
         ;
         
@@ -348,6 +392,32 @@ pub const McpServer = struct {
             \\    "query": {
             \\      "type": "string",
             \\      "description": "Query to find similar memories"
+            \\    },
+            \\    "memory_types": {
+            \\      "type": "array",
+            \\      "items": {
+            \\        "type": "string",
+            \\        "enum": ["experience", "concept", "fact", "decision", "observation", "preference", "context", "skill", "intention", "emotion"]
+            \\      },
+            \\      "description": "Filter by specific memory types (optional)"
+            \\    },
+            \\    "min_confidence": {
+            \\      "type": "string",
+            \\      "enum": ["very_low", "low", "medium", "high", "very_high"],
+            \\      "description": "Minimum confidence level (optional)"
+            \\    },
+            \\    "min_importance": {
+            \\      "type": "string",
+            \\      "enum": ["trivial", "low", "medium", "high", "critical"],
+            \\      "description": "Minimum importance level (optional)"
+            \\    },
+            \\    "session_id": {
+            \\      "type": "integer",
+            \\      "description": "Filter by session ID (optional)"
+            \\    },
+            \\    "user_id": {
+            \\      "type": "integer",
+            \\      "description": "Filter by user ID (optional)"
             \\    },
             \\    "limit": {
             \\      "type": "integer",
@@ -503,12 +573,12 @@ pub const McpServer = struct {
         const tools = [_]McpTool{
             McpTool{
                 .name = "store_memory",
-                .description = "Store a new memory/experience in the database",
+                .description = "Store a new semantic memory with type, confidence, and importance tracking",
                 .inputSchema = store_schema_parsed.value,
             },
             McpTool{
                 .name = "recall_similar",
-                .description = "Retrieve memories similar to a given query",
+                .description = "Retrieve semantic memories similar to a given query using the LLM memory system",
                 .inputSchema = recall_schema_parsed.value,
             },
             McpTool{
@@ -614,139 +684,87 @@ pub const McpServer = struct {
         return self.createErrorResponse(id, JsonRpcError.INTERNAL_ERROR, "Prompts not yet implemented", null);
     }
     
-    /// Handle store_memory tool
+    /// Handle store_memory tool - Store a new semantic memory using the LLM Memory Data Models
     fn handleStoreMemory(self: *Self, id: ?std.json.Value, arguments: ?std.json.Value) ![]u8 {
         const args = arguments orelse {
             return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Missing arguments", null);
         };
         
-        // Extract memory data from arguments
         const args_obj = args.object;
-        const node_id = args_obj.get("id") orelse {
-            return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Missing id", null);
-        };
-        const label = args_obj.get("label") orelse {
-            return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Missing label", null);
+        const content_value = args_obj.get("content") orelse {
+            return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Missing memory content", null);
         };
         
-        const memory_id: u64 = @intCast(node_id.integer);
-        const memory_text = label.string;
+        const content = content_value.string;
         
-        // 1. Create the main memory node
-        const memory_node = types.Node.init(memory_id, memory_text);
-        self.db.insertNode(memory_node) catch |err| {
-            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to store memory node: {any}", .{err});
+        // Parse memory type
+        const memory_type_str = if (args_obj.get("memory_type")) |mt| mt.string else "experience";
+        const memory_type = std.meta.stringToEnum(MemoryType, memory_type_str) orelse {
+            return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Invalid memory_type", null);
+        };
+        
+        // Parse confidence level
+        const confidence_str = if (args_obj.get("confidence")) |c| c.string else "medium";
+        const confidence = std.meta.stringToEnum(MemoryConfidence, confidence_str) orelse {
+            return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Invalid confidence level", null);
+        };
+        
+        // Parse importance level
+        const importance_str = if (args_obj.get("importance")) |i| i.string else "medium";
+        const importance = std.meta.stringToEnum(MemoryImportance, importance_str) orelse {
+            return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Invalid importance level", null);
+        };
+        
+        // Parse source
+        const source_str = if (args_obj.get("source")) |s| s.string else "user_input";
+        const source = std.meta.stringToEnum(MemorySource, source_str) orelse {
+            return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Invalid source", null);
+        };
+        
+        // Parse optional session and user IDs
+        const session_id = if (args_obj.get("session_id")) |sid| @as(u64, @intCast(sid.integer)) else null;
+        const user_id = if (args_obj.get("user_id")) |uid| @as(u64, @intCast(uid.integer)) else null;
+        
+        // Store the memory using the MemoryManager
+        const memory_id = self.memory_manager.storeMemory(
+            memory_type,
+            content,
+            .{
+                .confidence = confidence,
+                .importance = importance,
+                .source = source,
+                .session_id = session_id,
+                .user_id = user_id,
+            }
+        ) catch |err| {
+            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to store memory: {any}", .{err});
             defer self.allocator.free(error_msg);
             return self.createErrorResponse(id, JsonRpcError.INTERNAL_ERROR, error_msg, null);
         };
         
-        // 2. Create vector embedding for semantic similarity search
-        // For now, we'll create a simple embedding based on text characteristics
-        // In production, this would use a proper embedding model
-        const embedding = try self.createSimpleEmbedding(memory_text);
-        defer self.allocator.free(embedding);
-        const vector = types.Vector.init(memory_id, embedding);
-        self.db.insertVector(vector) catch |err| {
-            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to store memory vector: {any}", .{err});
-            defer self.allocator.free(error_msg);
-            return self.createErrorResponse(id, JsonRpcError.INTERNAL_ERROR, error_msg, null);
-        };
+        // Build success response
+        var response_text = std.ArrayList(u8).init(self.allocator);
+        defer response_text.deinit();
         
-        // 3. Extract and create concept nodes
-        const concepts = try self.extractConcepts(memory_text);
-        defer {
-            for (concepts.items) |concept| {
-                self.allocator.free(concept);
-            }
-            concepts.deinit();
+        const main_msg = try std.fmt.allocPrint(self.allocator, 
+            "Memory stored successfully with ID {}!\n\nMemory Details:\n• Type: {s}\n• Content: \"{s}\"\n• Confidence: {s}\n• Importance: {s}\n• Source: {s}\n", 
+            .{ memory_id, @tagName(memory_type), content, @tagName(confidence), @tagName(importance), @tagName(source) });
+        defer self.allocator.free(main_msg);
+        try response_text.appendSlice(main_msg);
+        
+        if (session_id) |sid| {
+            const session_msg = try std.fmt.allocPrint(self.allocator, "• Session ID: {}\n", .{sid});
+            defer self.allocator.free(session_msg);
+            try response_text.appendSlice(session_msg);
         }
         
-        var created_concepts = std.ArrayList(u64).init(self.allocator);
-        defer created_concepts.deinit();
-        
-        for (concepts.items) |concept| {
-            // Create concept node with a derived ID
-            const concept_id = self.generateConceptId(concept);
-            
-            // Check if concept already exists, if not create it
-            if (self.db.graph_index.getNode(concept_id) == null) {
-                const concept_node = types.Node.init(concept_id, concept);
-                self.db.insertNode(concept_node) catch |err| {
-                    std.debug.print("Warning: Failed to create concept node '{s}': {any}\n", .{ concept, err });
-                    continue;
-                };
-            }
-            
-            try created_concepts.append(concept_id);
-            
-            // 4. Create semantic relationship from memory to concept
-            const memory_to_concept_edge = types.Edge.init(memory_id, concept_id, types.EdgeKind.related);
-            self.db.insertEdge(memory_to_concept_edge) catch |err| {
-                std.debug.print("Warning: Failed to create memory->concept edge: {any}\n", .{err});
-            };
+        if (user_id) |uid| {
+            const user_msg = try std.fmt.allocPrint(self.allocator, "• User ID: {}\n", .{uid});
+            defer self.allocator.free(user_msg);
+            try response_text.appendSlice(user_msg);
         }
         
-        // 5. Create connections between related concepts
-        if (created_concepts.items.len > 1) {
-            for (created_concepts.items, 0..) |concept1_id, i| {
-                for (created_concepts.items[i+1..]) |concept2_id| {
-                    // Create bidirectional concept relationships
-                    const concept_edge1 = types.Edge.init(concept1_id, concept2_id, types.EdgeKind.similar_to);
-                    const concept_edge2 = types.Edge.init(concept2_id, concept1_id, types.EdgeKind.similar_to);
-                    
-                    self.db.insertEdge(concept_edge1) catch |err| {
-                        std.debug.print("Warning: Failed to create concept relationship: {any}\n", .{err});
-                    };
-                    self.db.insertEdge(concept_edge2) catch |err| {
-                        std.debug.print("Warning: Failed to create concept relationship: {any}\n", .{err});
-                    };
-                }
-            }
-        }
-        
-        // Build detailed response
-        var content_list = std.ArrayList(u8).init(self.allocator);
-        defer content_list.deinit();
-        
-        const header = try std.fmt.allocPrint(self.allocator, 
-            "Memory stored successfully with ID {}!\n\n", .{memory_id});
-        defer self.allocator.free(header);
-        try content_list.appendSlice(header);
-        
-        try content_list.appendSlice("Created memory structure:\n");
-        
-        const memory_info = try std.fmt.allocPrint(self.allocator, 
-            "• Memory Node: {} (\"{s}\")\n", .{ memory_id, memory_text });
-        defer self.allocator.free(memory_info);
-        try content_list.appendSlice(memory_info);
-        
-        const vector_info = try std.fmt.allocPrint(self.allocator, 
-            "• Vector Embedding: {} dimensions for semantic search\n", .{embedding.len});
-        defer self.allocator.free(vector_info);
-        try content_list.appendSlice(vector_info);
-        
-        if (created_concepts.items.len > 0) {
-            const concepts_info = try std.fmt.allocPrint(self.allocator, 
-                "• Extracted {} concepts: ", .{created_concepts.items.len});
-            defer self.allocator.free(concepts_info);
-            try content_list.appendSlice(concepts_info);
-            
-            for (concepts.items, 0..) |concept, i| {
-                if (i > 0) try content_list.appendSlice(", ");
-                try content_list.appendSlice("\"");
-                try content_list.appendSlice(concept);
-                try content_list.appendSlice("\"");
-            }
-            try content_list.appendSlice("\n");
-            
-            const relationships_count = created_concepts.items.len + (created_concepts.items.len * (created_concepts.items.len - 1) / 2);
-            const relationships_info = try std.fmt.allocPrint(self.allocator, 
-                "• Created {} semantic relationships\n", .{relationships_count});
-            defer self.allocator.free(relationships_info);
-            try content_list.appendSlice(relationships_info);
-        }
-        
-        try content_list.appendSlice("\nMemory is now searchable and explorable through the graph!");
+        try response_text.appendSlice("\nMemory is now available for semantic search and relationship exploration!");
         
         return self.createSuccessResponse(id, .{
             .content = [_]struct { 
@@ -755,7 +773,7 @@ pub const McpServer = struct {
             }{
                 .{
                     .type = "text",
-                    .text = content_list.items,
+                    .text = response_text.items,
                 },
             },
         });
@@ -878,7 +896,7 @@ pub const McpServer = struct {
         return hash | 0x8000000000000000; // Set high bit to distinguish from memory IDs
     }
     
-    /// Handle recall_similar tool
+    /// Handle recall_similar tool - Query semantic memories using the LLM Memory Data Models
     fn handleRecallSimilar(self: *Self, id: ?std.json.Value, arguments: ?std.json.Value) ![]u8 {
         const args = arguments orelse {
             return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Missing arguments", null);
@@ -890,70 +908,121 @@ pub const McpServer = struct {
             return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, "Missing query parameter", null);
         };
         
+        const query_str = query.string;
         const limit_value = args_obj.get("limit") orelse std.json.Value{ .integer = 5 };
         const limit: u32 = @intCast(limit_value.integer);
         
-        const query_str = query.string;
+        // Build MemoryQuery with advanced filtering
+        var memory_query = MemoryQuery.init();
+        memory_query.query_text = query_str;
+        memory_query.limit = limit;
+        memory_query.include_related = true;
         
-        // 1. Create embedding for the query
-        const query_embedding = try self.createSimpleEmbedding(query_str);
-        defer self.allocator.free(query_embedding);
+        // Parse memory type filters
+        if (args_obj.get("memory_types")) |mt_array| {
+            // For simplicity, we'll just handle the first type filter for now
+            // A full implementation would support multiple types
+            if (mt_array.array.items.len > 0) {
+                const first_type_str = mt_array.array.items[0].string;
+                if (std.meta.stringToEnum(MemoryType, first_type_str)) |memory_type| {
+                    memory_query.memory_types = &[_]MemoryType{memory_type};
+                }
+            }
+        }
         
-        // 2. Create a temporary vector for similarity search
-        const query_vector = types.Vector.init(0, query_embedding); // ID 0 for query
+        // Parse confidence filter
+        if (args_obj.get("min_confidence")) |conf| {
+            if (std.meta.stringToEnum(MemoryConfidence, conf.string)) |confidence| {
+                memory_query.min_confidence = confidence;
+            }
+        }
         
-        // 3. Use vector similarity search to find related memories
-        const similar_vectors = self.db.vector_search.querySimilarByVector(&self.db.vector_index, query_vector, limit) catch |err| {
-            // Fallback to string matching if vector search fails
-            std.debug.print("Vector search failed, falling back to string matching: {any}\n", .{err});
-            return self.handleRecallSimilarFallback(id, query_str, limit);
+        // Parse importance filter
+        if (args_obj.get("min_importance")) |imp| {
+            if (std.meta.stringToEnum(MemoryImportance, imp.string)) |importance| {
+                memory_query.min_importance = importance;
+            }
+        }
+        
+        // Parse session filter
+        if (args_obj.get("session_id")) |sid| {
+            memory_query.session_id = @intCast(sid.integer);
+        }
+        
+        // Parse user filter
+        if (args_obj.get("user_id")) |uid| {
+            memory_query.user_id = @intCast(uid.integer);
+        }
+        
+        // Execute the memory query using MemoryManager
+        var query_results = self.memory_manager.queryMemories(memory_query) catch |err| {
+            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to query memories: {any}", .{err});
+            defer self.allocator.free(error_msg);
+            return self.createErrorResponse(id, JsonRpcError.INTERNAL_ERROR, error_msg, null);
         };
-        defer similar_vectors.deinit();
+        defer query_results.deinit();
         
-        // 4. Build response with similar memories
+        // Build response with semantic memory details
         var content_list = std.ArrayList(u8).init(self.allocator);
         defer content_list.deinit();
         
-        try content_list.appendSlice("Found memories similar to query \"");
-        try content_list.appendSlice(query_str);
-        try content_list.appendSlice("\":\n\n");
+        const header = try std.fmt.allocPrint(self.allocator, 
+            "Found {} memories similar to query \"{s}\":\n\n", 
+            .{ query_results.memories.items.len, query_str });
+        defer self.allocator.free(header);
+        try content_list.appendSlice(header);
         
-        if (similar_vectors.items.len == 0) {
-            try content_list.appendSlice("No similar memories found.");
+        if (query_results.memories.items.len == 0) {
+            try content_list.appendSlice("No matching memories found.");
         } else {
-            for (similar_vectors.items, 0..) |result, i| {
-                // Get the memory node for this vector
-                if (self.db.graph_index.getNode(result.id)) |memory_node| {
-                    const memory_text = try std.fmt.allocPrint(self.allocator, 
-                        "{}. Memory {}: \"{s}\" (similarity: {d:.3})\n", 
-                        .{ i + 1, result.id, memory_node.getLabelAsString(), result.similarity });
-                    defer self.allocator.free(memory_text);
-                    try content_list.appendSlice(memory_text);
+            // Show execution details
+            const exec_info = try std.fmt.allocPrint(self.allocator, 
+                "Query executed in {}ms\n\n", .{query_results.execution_time_ms});
+            defer self.allocator.free(exec_info);
+            try content_list.appendSlice(exec_info);
+            
+            // List each memory with full semantic details
+            for (query_results.memories.items, 0..) |memory, i| {
+                const similarity_score = if (i < query_results.similarity_scores.items.len) 
+                    query_results.similarity_scores.items[i] else 0.0;
                     
-                    // Show related concepts
-                    if (self.db.graph_index.getOutgoingEdges(result.id)) |edges| {
-                        var concept_names = std.ArrayList([]const u8).init(self.allocator);
-                        defer concept_names.deinit();
-                        
-                        for (edges) |edge| {
-                            if (edge.getKind() == types.EdgeKind.related) {
-                                if (self.db.graph_index.getNode(edge.to)) |concept_node| {
-                                    try concept_names.append(concept_node.getLabelAsString());
-                                }
-                            }
-                        }
-                        
-                        if (concept_names.items.len > 0) {
-                            try content_list.appendSlice("   Concepts: ");
-                            for (concept_names.items, 0..) |concept, j| {
-                                if (j > 0) try content_list.appendSlice(", ");
-                                try content_list.appendSlice(concept);
-                            }
-                            try content_list.appendSlice("\n");
-                        }
-                    }
-                    try content_list.appendSlice("\n");
+                const memory_info = try std.fmt.allocPrint(self.allocator,
+                    "{}. Memory {} (Type: {s}, Confidence: {s}, Importance: {s})\n" ++
+                    "   Content: \"{s}\"\n" ++
+                    "   Source: {s}, Created: {}\n" ++
+                    "   Similarity: {d:.3}\n",
+                    .{ 
+                        i + 1, memory.id, @tagName(memory.memory_type), 
+                        @tagName(memory.confidence), @tagName(memory.importance),
+                        memory.getContentAsString(),
+                        @tagName(memory.source), memory.created_at,
+                        similarity_score
+                    });
+                defer self.allocator.free(memory_info);
+                try content_list.appendSlice(memory_info);
+                
+                if (memory.session_id != 0) {
+                    const session_info = try std.fmt.allocPrint(self.allocator, "   Session: {}\n", .{memory.session_id});
+                    defer self.allocator.free(session_info);
+                    try content_list.appendSlice(session_info);
                 }
+                
+                try content_list.appendSlice("\n");
+            }
+            
+            // Show related memories and relationships if found
+            if (query_results.related_memories.items.len > 0) {
+                const related_header = try std.fmt.allocPrint(self.allocator, 
+                    "Related memories found: {}\n", .{query_results.related_memories.items.len});
+                defer self.allocator.free(related_header);
+                try content_list.appendSlice(related_header);
+            }
+            
+            if (query_results.relationships.items.len > 0) {
+                const rel_header = try std.fmt.allocPrint(self.allocator, 
+                    "Semantic relationships: {}\n", .{query_results.relationships.items.len});
+                defer self.allocator.free(rel_header);
+                try content_list.appendSlice(rel_header);
             }
         }
         

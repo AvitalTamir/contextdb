@@ -27,11 +27,12 @@ test "MCP server initialization" {
     defer db.deinit();
 
     // Initialize MCP server
-    const server = mcp_server.McpServer.init(allocator, &db, 0);
+    var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Check server info
     try testing.expectEqualStrings("memora", server.server_info.name);
-    try testing.expectEqualStrings("1.0.0", server.server_info.version);
+    try testing.expectEqualStrings("2.0.0", server.server_info.version);
 
     // Check capabilities
     try testing.expect(server.capabilities.resources != null);
@@ -60,6 +61,7 @@ test "MCP JSON-RPC initialize request" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Send initialize request
     const request = 
@@ -92,7 +94,7 @@ test "MCP JSON-RPC initialize request" {
     
     const server_info = result.get("serverInfo").?.object;
     try testing.expectEqualStrings("memora", server_info.get("name").?.string);
-    try testing.expectEqualStrings("1.0.0", server_info.get("version").?.string);
+    try testing.expectEqualStrings("2.0.0", server_info.get("version").?.string);
 }
 
 test "MCP ping request" {
@@ -116,6 +118,7 @@ test "MCP ping request" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Create ping request
     const request = 
@@ -165,6 +168,7 @@ test "MCP resources/list request" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Create resources/list request  
     const request = 
@@ -222,6 +226,7 @@ test "MCP resources/read stats request" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Create resources/read request
     const request = 
@@ -291,6 +296,7 @@ test "MCP tools/list request" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Create tools/list request
     const request = 
@@ -345,8 +351,9 @@ test "MCP store_memory tool call" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
-    // Create tools/call request for store_memory
+    // Create tools/call request for store_memory using new semantic schema
     const request = 
         \\{
         \\  "jsonrpc": "2.0",
@@ -355,8 +362,11 @@ test "MCP store_memory tool call" {
         \\  "params": {
         \\    "name": "store_memory",
         \\    "arguments": {
-        \\      "id": 42,
-        \\      "label": "TestMemory"
+        \\      "content": "TestMemory content for LLM memory system",
+        \\      "memory_type": "experience",
+        \\      "confidence": "high",
+        \\      "importance": "medium",
+        \\      "source": "user_input"
         \\    }
         \\  }
         \\}
@@ -405,6 +415,7 @@ test "MCP error handling - invalid JSON" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Create invalid JSON request
     const request = "{ invalid json }";
@@ -450,6 +461,7 @@ test "MCP error handling - method not found" {
 
     // Initialize MCP server
     var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
 
     // Create request with unknown method
     const request = 

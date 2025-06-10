@@ -345,4 +345,16 @@ pub fn build(b: *std.Build) void {
     enhanced_memory_exe.root_module.addImport("memora", memora_module);
     const enhanced_memory_run = b.addRunArtifact(enhanced_memory_exe);
     enhanced_memory_step.dependOn(&enhanced_memory_run.step);
+
+    // Add LLM Memory Demo - showcase the new memory data models
+    const llm_memory_demo_step = b.step("llm-memory-demo", "Demonstrate LLM memory data models with semantic storage and retrieval");
+    const llm_memory_demo_exe = b.addExecutable(.{
+        .name = "llm_memory_demo",
+        .root_source_file = b.path("examples/llm_memory_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    llm_memory_demo_exe.root_module.addImport("memora", memora_module);
+    const llm_memory_demo_run = b.addRunArtifact(llm_memory_demo_exe);
+    llm_memory_demo_step.dependOn(&llm_memory_demo_run.step);
 } 
