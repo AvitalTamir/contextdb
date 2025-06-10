@@ -147,6 +147,99 @@ pub const GraphIndex = struct {
         }
         return total;
     }
+
+    /// Remove a node and all its associated edges
+    pub fn removeNode(self: *GraphIndex, node_id: u64) !void {
+        // Remove the node itself
+        _ = self.nodes.remove(node_id);
+
+        // Remove all outgoing edges from this node
+        if (self.outgoing_edges.getPtr(node_id)) |outgoing_list| {
+            // For each outgoing edge, remove it from the target's incoming edges
+            for (outgoing_list.items) |edge| {
+                if (self.incoming_edges.getPtr(edge.to)) |incoming_list| {
+                    for (incoming_list.items, 0..) |incoming_edge, i| {
+                        if (incoming_edge.from == node_id and incoming_edge.to == edge.to and incoming_edge.kind == edge.kind) {
+                            _ = incoming_list.swapRemove(i);
+                            break;
+                        }
+                    }
+                }
+                
+                // Remove from edges_by_kind
+                if (self.edges_by_kind.getPtr(edge.kind)) |kind_list| {
+                    for (kind_list.items, 0..) |kind_edge, i| {
+                        if (kind_edge.from == edge.from and kind_edge.to == edge.to and kind_edge.kind == edge.kind) {
+                            _ = kind_list.swapRemove(i);
+                            break;
+                        }
+                    }
+                }
+            }
+            outgoing_list.deinit();
+            _ = self.outgoing_edges.remove(node_id);
+        }
+
+        // Remove all incoming edges to this node
+        if (self.incoming_edges.getPtr(node_id)) |incoming_list| {
+            // For each incoming edge, remove it from the source's outgoing edges
+            for (incoming_list.items) |edge| {
+                if (self.outgoing_edges.getPtr(edge.from)) |outgoing_list| {
+                    for (outgoing_list.items, 0..) |outgoing_edge, i| {
+                        if (outgoing_edge.from == edge.from and outgoing_edge.to == node_id and outgoing_edge.kind == edge.kind) {
+                            _ = outgoing_list.swapRemove(i);
+                            break;
+                        }
+                    }
+                }
+                
+                // Remove from edges_by_kind  
+                if (self.edges_by_kind.getPtr(edge.kind)) |kind_list| {
+                    for (kind_list.items, 0..) |kind_edge, i| {
+                        if (kind_edge.from == edge.from and kind_edge.to == edge.to and kind_edge.kind == edge.kind) {
+                            _ = kind_list.swapRemove(i);
+                            break;
+                        }
+                    }
+                }
+            }
+            incoming_list.deinit();
+            _ = self.incoming_edges.remove(node_id);
+        }
+    }
+
+    /// Remove a specific edge
+    pub fn removeEdge(self: *GraphIndex, from: u64, to: u64) !void {
+        // Find and remove the edge from outgoing edges
+        if (self.outgoing_edges.getPtr(from)) |outgoing_list| {
+            for (outgoing_list.items, 0..) |edge, i| {
+                if (edge.to == to) {
+                    const removed_edge = outgoing_list.swapRemove(i);
+                    
+                    // Remove from incoming edges
+                    if (self.incoming_edges.getPtr(to)) |incoming_list| {
+                        for (incoming_list.items, 0..) |incoming_edge, j| {
+                            if (incoming_edge.from == from and incoming_edge.kind == removed_edge.kind) {
+                                _ = incoming_list.swapRemove(j);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Remove from edges_by_kind
+                    if (self.edges_by_kind.getPtr(removed_edge.kind)) |kind_list| {
+                        for (kind_list.items, 0..) |kind_edge, j| {
+                            if (kind_edge.from == from and kind_edge.to == to and kind_edge.kind == removed_edge.kind) {
+                                _ = kind_list.swapRemove(j);
+                                break;
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
 };
 
 /// Graph traversal engine for complex queries

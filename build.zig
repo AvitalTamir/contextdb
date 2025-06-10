@@ -333,4 +333,16 @@ pub fn build(b: *std.Build) void {
         mcp_server_run.addArgs(args);
     }
     mcp_server_step.dependOn(&mcp_server_run.step);
+
+    // Add enhanced memory test example
+    const enhanced_memory_step = b.step("test-enhanced-memory", "Test enhanced memory storage with vector embeddings and concept graphs");
+    const enhanced_memory_exe = b.addExecutable(.{
+        .name = "test_enhanced_memory",
+        .root_source_file = b.path("examples/test_enhanced_memory.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    enhanced_memory_exe.root_module.addImport("memora", memora_module);
+    const enhanced_memory_run = b.addRunArtifact(enhanced_memory_exe);
+    enhanced_memory_step.dependOn(&enhanced_memory_run.step);
 } 
