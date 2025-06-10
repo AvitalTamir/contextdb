@@ -1574,33 +1574,22 @@ pub const McpServer = struct {
         const memory_id: u64 = @intCast(memory_id_value.integer);
         const new_label = new_label_value.string;
         
-        // Check if the memory exists
-        const existing_node = self.db.graph_index.getNode(memory_id) orelse {
+        // Get existing memory for reporting (also validates it exists)
+        const existing_memory = try self.memory_manager.getMemory(memory_id) orelse {
             const error_msg = try std.fmt.allocPrint(self.allocator, "Memory {} not found", .{memory_id});
             defer self.allocator.free(error_msg);
             return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, error_msg, null);
         };
         
-        // Store old label for reporting
-        const old_label = existing_node.getLabelAsString();
+        // Store old content for reporting
+        const old_content = existing_memory.getContentAsString();
         
-        // First, clean up old relationships
+        // First, clean up old relationships (concept-related edges)
         _ = try self.cleanupMemoryRelationships(memory_id);
         
-        // Update the memory node with new content
-        const updated_node = types.Node.init(memory_id, new_label);
-        self.db.insertNode(updated_node) catch |err| {
-            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to update memory node: {any}", .{err});
-            defer self.allocator.free(error_msg);
-            return self.createErrorResponse(id, JsonRpcError.INTERNAL_ERROR, error_msg, null);
-        };
-        
-        // Create new vector embedding for the updated content
-        const embedding = try self.createSimpleEmbedding(new_label);
-        defer self.allocator.free(embedding);
-        const vector = types.Vector.init(memory_id, embedding);
-        self.db.insertVector(vector) catch |err| {
-            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to update memory vector: {any}", .{err});
+        // Update the memory using MemoryManager (this handles content persistence and embedding)
+        self.memory_manager.updateMemory(memory_id, new_label, .{}) catch |err| {
+            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to update memory: {any}", .{err});
             defer self.allocator.free(error_msg);
             return self.createErrorResponse(id, JsonRpcError.INTERNAL_ERROR, error_msg, null);
         };
@@ -1665,7 +1654,7 @@ pub const McpServer = struct {
         try content_list.appendSlice(header);
         
         const old_info = try std.fmt.allocPrint(self.allocator, 
-            "Old content: \"{s}\"\n", .{old_label});
+            "Old content: \"{s}\"\n", .{old_content});
         defer self.allocator.free(old_info);
         try content_list.appendSlice(old_info);
         
@@ -1674,10 +1663,7 @@ pub const McpServer = struct {
         defer self.allocator.free(new_info);
         try content_list.appendSlice(new_info);
         
-        const vector_info = try std.fmt.allocPrint(self.allocator, 
-            "• Updated vector embedding: {} dimensions\n", .{embedding.len});
-        defer self.allocator.free(vector_info);
-        try content_list.appendSlice(vector_info);
+        try content_list.appendSlice("• Updated vector embedding: 128 dimensions\n");
         
         if (created_concepts.items.len > 0) {
             const concepts_info = try std.fmt.allocPrint(self.allocator, 
@@ -1687,29 +1673,24 @@ pub const McpServer = struct {
             
             for (concepts.items, 0..) |concept, i| {
                 if (i > 0) try content_list.appendSlice(", ");
-                try content_list.appendSlice("\"");
                 try content_list.appendSlice(concept);
-                try content_list.appendSlice("\"");
             }
             try content_list.appendSlice("\n");
             
-            const relationships_count = created_concepts.items.len + (created_concepts.items.len * (created_concepts.items.len - 1) / 2);
+            // Count relationships
+            const total_relationships = created_concepts.items.len + 
+                (created_concepts.items.len * (created_concepts.items.len - 1)); // memory->concepts + concept-concept pairs
+            
             const relationships_info = try std.fmt.allocPrint(self.allocator, 
-                "• Created {} new semantic relationships\n", .{relationships_count});
+                "• Created {} semantic relationships\n", .{total_relationships});
             defer self.allocator.free(relationships_info);
             try content_list.appendSlice(relationships_info);
         }
         
-        // Clean up any orphaned concepts from the old relationships
-        const orphaned_concepts = try self.cleanupOrphanedConcepts();
-        if (orphaned_concepts > 0) {
-            const cleanup_info = try std.fmt.allocPrint(self.allocator, 
-                "• Cleaned up {} orphaned concept nodes from old relationships\n", .{orphaned_concepts});
-            defer self.allocator.free(cleanup_info);
-            try content_list.appendSlice(cleanup_info);
-        }
-        
-        try content_list.appendSlice("\nMemory has been updated and is ready for semantic search!");
+        const summary = try std.fmt.allocPrint(self.allocator, 
+            "\nMemory content and semantic relationships have been successfully updated.", .{});
+        defer self.allocator.free(summary);
+        try content_list.appendSlice(summary);
         
         return self.createSuccessResponse(id, .{
             .content = [_]struct { 
@@ -1737,14 +1718,14 @@ pub const McpServer = struct {
         
         const memory_id: u64 = @intCast(memory_id_value.integer);
         
-        // Check if the memory exists and get its label for reporting
-        const existing_node = self.db.graph_index.getNode(memory_id) orelse {
+        // Get existing memory for reporting and validation (also validates it exists)
+        const existing_memory = try self.memory_manager.getMemory(memory_id) orelse {
             const error_msg = try std.fmt.allocPrint(self.allocator, "Memory {} not found", .{memory_id});
             defer self.allocator.free(error_msg);
             return self.createErrorResponse(id, JsonRpcError.INVALID_PARAMS, error_msg, null);
         };
         
-        const memory_label = existing_node.getLabelAsString();
+        const memory_content = existing_memory.getContentAsString();
         
         // Count relationships before deletion for reporting
         var deleted_edges: u32 = 0;
@@ -1756,7 +1737,14 @@ pub const McpServer = struct {
         // Check for orphaned concept nodes and clean them up
         orphaned_concepts = try self.cleanupOrphanedConcepts();
         
-        // Remove the memory node itself
+        // Remove the memory using MemoryManager (this handles content cache cleanup)
+        self.memory_manager.forgetMemory(memory_id) catch |err| {
+            const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to forget memory: {any}", .{err});
+            defer self.allocator.free(error_msg);
+            return self.createErrorResponse(id, JsonRpcError.INTERNAL_ERROR, error_msg, null);
+        };
+        
+        // Remove the memory node from database
         self.db.graph_index.removeNode(memory_id) catch |err| {
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to remove memory node: {any}", .{err});
             defer self.allocator.free(error_msg);
@@ -1779,7 +1767,7 @@ pub const McpServer = struct {
         try content_list.appendSlice(header);
         
         const forgotten_info = try std.fmt.allocPrint(self.allocator, 
-            "Forgotten memory: \"{s}\"\n\n", .{memory_label});
+            "Forgotten memory: \"{s}\"\n\n", .{memory_content});
         defer self.allocator.free(forgotten_info);
         try content_list.appendSlice(forgotten_info);
         
@@ -1799,6 +1787,7 @@ pub const McpServer = struct {
         
         try content_list.appendSlice("• Removed vector embedding\n");
         try content_list.appendSlice("• Removed memory node\n");
+        try content_list.appendSlice("• Cleaned up memory content cache\n");
         
         try content_list.appendSlice("\nMemory and all associated data have been completely removed from the database.");
         

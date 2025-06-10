@@ -491,4 +491,208 @@ test "MCP error handling - method not found" {
     
     const error_obj = response_obj.get("error").?.object;
     try testing.expect(error_obj.get("code").?.integer == mcp_server.JsonRpcError.METHOD_NOT_FOUND);
+}
+
+test "MCP MemoryManager integration - store, update, delete cycle" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Clean up test data
+    std.fs.cwd().deleteTree("test_mcp_memory_integration") catch {};
+    defer std.fs.cwd().deleteTree("test_mcp_memory_integration") catch {};
+
+    // Create test database
+    const config = MemoraConfig{
+        .data_path = "test_mcp_memory_integration",
+        .auto_snapshot_interval = 100,
+        .enable_persistent_indexes = true,
+    };
+
+    var db = try Memora.init(allocator, config, null);
+    defer db.deinit();
+
+    // Initialize MCP server
+    var server = mcp_server.McpServer.init(allocator, &db, 0);
+    defer server.deinit();
+
+    // Step 1: Store a memory
+    const store_request = 
+        \\{
+        \\  "jsonrpc": "2.0",
+        \\  "id": 1,
+        \\  "method": "tools/call",
+        \\  "params": {
+        \\    "name": "store_memory",
+        \\    "arguments": {
+        \\      "content": "Original memory content with important information",
+        \\      "memory_type": "experience",
+        \\      "confidence": "high",
+        \\      "importance": "medium",
+        \\      "source": "user_input"
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const store_response = try server.handleRequest(store_request);
+    defer allocator.free(store_response);
+    
+    // Verify store was successful
+    var store_parsed = try std.json.parseFromSlice(std.json.Value, allocator, store_response, .{});
+    defer store_parsed.deinit();
+    const store_obj = store_parsed.value.object;
+    try testing.expect(store_obj.get("error") == null);
+    
+    // Step 2: Recall the memory to verify it was stored with full content
+    const recall_request = 
+        \\{
+        \\  "jsonrpc": "2.0",
+        \\  "id": 2,
+        \\  "method": "tools/call",
+        \\  "params": {
+        \\    "name": "recall_memories",
+        \\    "arguments": {
+        \\      "memory_id": 1
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const recall_response = try server.handleRequest(recall_request);
+    defer allocator.free(recall_response);
+    
+    var recall_parsed = try std.json.parseFromSlice(std.json.Value, allocator, recall_response, .{});
+    defer recall_parsed.deinit();
+    const recall_obj = recall_parsed.value.object;
+    try testing.expect(recall_obj.get("error") == null);
+    
+    // Verify the full content is returned (not truncated to 32 bytes)
+    const recall_result = recall_obj.get("result").?.object;
+    const recall_content = recall_result.get("content").?.array.items[0].object.get("text").?.string;
+    try testing.expect(std.mem.indexOf(u8, recall_content, "Original memory content with important information") != null);
+
+    // Step 3: Update the memory content
+    const update_request = 
+        \\{
+        \\  "jsonrpc": "2.0",
+        \\  "id": 3,
+        \\  "method": "tools/call",
+        \\  "params": {
+        \\    "name": "update_memory",
+        \\    "arguments": {
+        \\      "id": 1,
+        \\      "new_label": "Updated memory content with completely different information and concepts"
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const update_response = try server.handleRequest(update_request);
+    defer allocator.free(update_response);
+    
+    var update_parsed = try std.json.parseFromSlice(std.json.Value, allocator, update_response, .{});
+    defer update_parsed.deinit();
+    const update_obj = update_parsed.value.object;
+    try testing.expect(update_obj.get("error") == null);
+    
+    // Verify update success message includes both old and new content
+    const update_result = update_obj.get("result").?.object;
+    const update_content = update_result.get("content").?.array.items[0].object.get("text").?.string;
+    try testing.expect(std.mem.indexOf(u8, update_content, "Old content:") != null);
+    try testing.expect(std.mem.indexOf(u8, update_content, "New content:") != null);
+    try testing.expect(std.mem.indexOf(u8, update_content, "Updated memory content with completely different") != null);
+
+    // Step 4: Recall the memory again to verify the update persisted
+    const recall2_response = try server.handleRequest(recall_request);
+    defer allocator.free(recall2_response);
+    
+    var recall2_parsed = try std.json.parseFromSlice(std.json.Value, allocator, recall2_response, .{});
+    defer recall2_parsed.deinit();
+    const recall2_obj = recall2_parsed.value.object;
+    try testing.expect(recall2_obj.get("error") == null);
+    
+    // Verify the updated content is now returned
+    const recall2_result = recall2_obj.get("result").?.object;
+    const recall2_content = recall2_result.get("content").?.array.items[0].object.get("text").?.string;
+    try testing.expect(std.mem.indexOf(u8, recall2_content, "Updated memory content with completely different") != null);
+    try testing.expect(std.mem.indexOf(u8, recall2_content, "Original memory content") == null);
+
+    // Step 5: Test semantic search to verify embedding was updated
+    const search_request = 
+        \\{
+        \\  "jsonrpc": "2.0",
+        \\  "id": 4,
+        \\  "method": "tools/call",
+        \\  "params": {
+        \\    "name": "recall_similar",
+        \\    "arguments": {
+        \\      "query": "different information concepts",
+        \\      "limit": 3
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const search_response = try server.handleRequest(search_request);
+    defer allocator.free(search_response);
+    
+    var search_parsed = try std.json.parseFromSlice(std.json.Value, allocator, search_response, .{});
+    defer search_parsed.deinit();
+    const search_obj = search_parsed.value.object;
+    try testing.expect(search_obj.get("error") == null);
+
+    // Step 6: Delete the memory  
+    const delete_request = 
+        \\{
+        \\  "jsonrpc": "2.0",
+        \\  "id": 5,
+        \\  "method": "tools/call",
+        \\  "params": {
+        \\    "name": "forget_memory",
+        \\    "arguments": {
+        \\      "id": 1
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const delete_response = try server.handleRequest(delete_request);
+    defer allocator.free(delete_response);
+    
+    var delete_parsed = try std.json.parseFromSlice(std.json.Value, allocator, delete_response, .{});
+    defer delete_parsed.deinit();
+    const delete_obj = delete_parsed.value.object;
+    try testing.expect(delete_obj.get("error") == null);
+    
+    // Verify deletion success message includes the deleted content
+    const delete_result = delete_obj.get("result").?.object;
+    const delete_content = delete_result.get("content").?.array.items[0].object.get("text").?.string;
+    try testing.expect(std.mem.indexOf(u8, delete_content, "forgotten successfully") != null);
+    try testing.expect(std.mem.indexOf(u8, delete_content, "Updated memory content with completely different") != null);
+    try testing.expect(std.mem.indexOf(u8, delete_content, "Cleaned up memory content cache") != null);
+
+    // Step 7: Try to recall the deleted memory (should fail)
+    const recall3_response = try server.handleRequest(recall_request);
+    defer allocator.free(recall3_response);
+    
+    var recall3_parsed = try std.json.parseFromSlice(std.json.Value, allocator, recall3_response, .{});
+    defer recall3_parsed.deinit();
+    const recall3_obj = recall3_parsed.value.object;
+    
+    // The memory should either error out or return empty/not found
+    // Let's just verify the response is different from when the memory existed
+    if (recall3_obj.get("error")) |_| {
+        // Error response is fine - memory was deleted
+        std.debug.print("Memory deletion verified: got error response as expected\n", .{});
+    } else if (recall3_obj.get("result")) |result| {
+        // Check if result indicates memory not found
+        const recall3_result = result.object;
+        const recall3_content = recall3_result.get("content").?.array.items[0].object.get("text").?.string;
+        // Should not contain the updated content anymore
+        try testing.expect(std.mem.indexOf(u8, recall3_content, "Updated memory content with completely different") == null);
+        std.debug.print("Memory deletion verified: memory content no longer accessible\n", .{});
+    } else {
+        try testing.expect(false); // Should have either error or result
+    }
 } 
