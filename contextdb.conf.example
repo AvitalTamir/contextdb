@@ -142,7 +142,7 @@ persistent_index_auto_cleanup = true
 persistent_index_max_file_size_mb = 1024
 
 # Enable index compression - future feature (true/false)
-persistent_index_compression_enable = false
+persistent_index_compression_enable = true
 
 # Force sync indexes on database shutdown (true/false)
 persistent_index_sync_on_shutdown = true
@@ -155,7 +155,7 @@ snapshot_auto_interval = 0
 snapshot_max_metadata_size_mb = 10
 
 # Enable snapshot compression - future feature (true/false)
-snapshot_compression_enable = false
+snapshot_compression_enable = true
 
 # Keep this many snapshots during cleanup
 snapshot_cleanup_keep_count = 10
@@ -267,6 +267,36 @@ cluster_failure_detection_ms = 10000
 
 # Prevent split-brain scenarios with network partitions (true/false)
 cluster_split_brain_protection = true
+
+# Ultra-Fast Compression System Configuration
+# Optimized for vector embeddings and binary index data
+
+# Vector quantization scale factor (255.0 = 8-bit quantization)
+compression_vector_quantization_scale = 255.0
+
+# Vector quantization offset for zero-point adjustment
+compression_vector_quantization_offset = 0.0
+
+# Enable delta encoding for vector IDs (true/false)
+compression_enable_delta_encoding = true
+
+# Minimum run length for RLE compression (3-10 recommended)
+compression_rle_min_run_length = 3
+
+# Enable checksums for compressed data integrity (true/false)
+compression_enable_checksums = true
+
+# Enable parallel compression - future feature (true/false)
+compression_parallel_enable = false
+
+# Compression level: 1=fast, 9=best compression (1-3 recommended for speed)
+compression_level = 1
+
+# Minimum data size to trigger compression in bytes
+compression_min_size_threshold = 1024
+
+# Minimum compression ratio to actually use compression (1.2 = 20% savings)
+compression_min_ratio_threshold = 1.2
 
 # Future configuration sections will be added here
 # For example:

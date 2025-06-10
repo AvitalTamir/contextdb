@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const config = @import("config.zig");
+const compression = @import("compression.zig");
 
 /// Memory-Mapped Persistent Index System
 /// Provides instant startup and crash-safe index persistence
@@ -33,7 +34,7 @@ pub const PersistentIndexConfig = struct {
     }
 };
 
-/// Header for all persistent index files
+/// File header for persistent index files
 pub const IndexFileHeader = struct {
     magic: u32 = 0x49444558, // "IDEX" in little-endian
     version: u16 = 1,
@@ -42,7 +43,11 @@ pub const IndexFileHeader = struct {
     created_timestamp: u64,
     item_count: u64,
     data_offset: u64, // Offset to start of data section
-    padding: [24]u8 = [_]u8{0} ** 24, // Adjusted padding for alignment
+    // NEW: Compression support
+    compression_method: compression.CompressionMethod = .none,
+    compressed_size: u64 = 0, // Size of compressed data (0 if uncompressed)
+    original_size: u64 = 0, // Original uncompressed size
+    padding: [16]u8 = [_]u8{0} ** 16, // Adjusted padding for alignment
     
     pub const IndexType = enum(u8) {
         graph_nodes = 1,
@@ -139,28 +144,56 @@ pub const MappedFile = struct {
     
     pub fn getDataSlice(self: *const MappedFile, comptime T: type) ![]const T {
         const header = try self.getHeader();
-        const data_start = header.data_offset;
+        var data_start = header.data_offset;
+        
+        if (data_start >= self.size) return error.InvalidDataOffset;
+        
+        // Ensure data start is properly aligned for type T
+        const alignment = @alignOf(T);
+        const misalignment = data_start % alignment;
+        if (misalignment != 0) {
+            data_start += alignment - misalignment;
+        }
         
         if (data_start >= self.size) return error.InvalidDataOffset;
         
         const remaining_bytes = self.size - data_start;
         const item_count = remaining_bytes / @sizeOf(T);
         
+        if (item_count == 0) {
+            return &[_]T{}; // Return empty slice instead of attempting pointer cast
+        }
+        
         const data_ptr = self.mapping.ptr + data_start;
-        return @as([*]const T, @ptrCast(@alignCast(data_ptr)))[0..item_count];
+        const aligned_ptr = @as([*]const T, @ptrCast(@alignCast(data_ptr)));
+        return aligned_ptr[0..item_count];
     }
     
     pub fn getDataSliceMutable(self: *MappedFile, comptime T: type) ![]T {
         const header = try self.getHeader();
-        const data_start = header.data_offset;
+        var data_start = header.data_offset;
+        
+        if (data_start >= self.size) return error.InvalidDataOffset;
+        
+        // Ensure data start is properly aligned for type T
+        const alignment = @alignOf(T);
+        const misalignment = data_start % alignment;
+        if (misalignment != 0) {
+            data_start += alignment - misalignment;
+        }
         
         if (data_start >= self.size) return error.InvalidDataOffset;
         
         const remaining_bytes = self.size - data_start;
         const item_count = remaining_bytes / @sizeOf(T);
         
+        if (item_count == 0) {
+            return &[_]T{}; // Return empty slice instead of attempting pointer cast
+        }
+        
         const data_ptr = self.mapping.ptr + data_start;
-        return @as([*]T, @ptrCast(@alignCast(data_ptr)))[0..item_count];
+        const aligned_ptr = @as([*]T, @ptrCast(@alignCast(data_ptr)));
+        return aligned_ptr[0..item_count];
     }
 };
 
@@ -189,8 +222,11 @@ pub const PersistentNodeIndex = struct {
     
     pub fn create(self: *PersistentNodeIndex, nodes: []const types.Node) !void {
         const header_size = @sizeOf(IndexFileHeader);
+        // Ensure data offset is aligned for Node structure
+        const node_alignment = @alignOf(types.Node);
+        const aligned_data_offset = std.mem.alignForward(usize, header_size, node_alignment);
         const data_size = nodes.len * @sizeOf(types.Node);
-        const total_size = @max(header_size + data_size, header_size + 1); // Ensure minimum size
+        const total_size = @max(aligned_data_offset + data_size, header_size + 1); // Ensure minimum size
         
         // Create memory-mapped file
         var mapped_file = try MappedFile.init(self.allocator, self.path, total_size, 16384);
@@ -202,7 +238,7 @@ pub const PersistentNodeIndex = struct {
             .checksum = 0, // Will be calculated later
             .created_timestamp = @intCast(std.time.timestamp()),
             .item_count = nodes.len,
-            .data_offset = header_size,
+            .data_offset = aligned_data_offset,
         };
         
         // Copy node data only if we have nodes
@@ -212,7 +248,7 @@ pub const PersistentNodeIndex = struct {
         }
         
         // Calculate and set checksum (for data after header)
-        const data_section = mapped_file.mapping[@sizeOf(IndexFileHeader)..];
+        const data_section = mapped_file.mapping[aligned_data_offset..];
         header.checksum = calculateChecksum(data_section);
         
         // Sync to disk
@@ -230,18 +266,40 @@ pub const PersistentNodeIndex = struct {
         }
         
         const file = &self.mapped_file.?;
-        const header = try file.getHeader();
+        const header = file.getHeader() catch |err| {
+            // Clean up on header read error
+            file.deinit();
+            self.mapped_file = null;
+            return err;
+        };
         
         // Validate header
-        if (header.magic != 0x49444558) return error.InvalidMagic;
-        if (header.index_type != .graph_nodes) return error.WrongIndexType;
+        if (header.magic != 0x49444558) {
+            file.deinit();
+            self.mapped_file = null;
+            return error.InvalidMagic;
+        }
+        if (header.index_type != .graph_nodes) {
+            file.deinit();
+            self.mapped_file = null;
+            return error.WrongIndexType;
+        }
         
         // Validate checksum
-        const data_section = file.mapping[@sizeOf(IndexFileHeader)..];
+        const data_section = file.mapping[header.data_offset..];
         const expected_checksum = calculateChecksum(data_section);
-        if (header.checksum != expected_checksum) return error.ChecksumMismatch;
+        if (header.checksum != expected_checksum) {
+            file.deinit();
+            self.mapped_file = null;
+            return error.ChecksumMismatch;
+        }
         
-        return try file.getDataSlice(types.Node);
+        return file.getDataSlice(types.Node) catch |err| {
+            // Clean up on data slice error
+            file.deinit();
+            self.mapped_file = null;
+            return err;
+        };
     }
     
     pub fn exists(self: *const PersistentNodeIndex) bool {
@@ -275,8 +333,11 @@ pub const PersistentEdgeIndex = struct {
     
     pub fn create(self: *PersistentEdgeIndex, edges: []const types.Edge) !void {
         const header_size = @sizeOf(IndexFileHeader);
+        // Ensure data offset is aligned for Edge structure
+        const edge_alignment = @alignOf(types.Edge);
+        const aligned_data_offset = std.mem.alignForward(usize, header_size, edge_alignment);
         const data_size = edges.len * @sizeOf(types.Edge);
-        const total_size = @max(header_size + data_size, header_size + 1); // Ensure minimum size
+        const total_size = @max(aligned_data_offset + data_size, header_size + 1); // Ensure minimum size
         
         var mapped_file = try MappedFile.init(self.allocator, self.path, total_size, 16384);
         
@@ -286,7 +347,7 @@ pub const PersistentEdgeIndex = struct {
             .checksum = 0,
             .created_timestamp = @intCast(std.time.timestamp()),
             .item_count = edges.len,
-            .data_offset = header_size,
+            .data_offset = aligned_data_offset,
         };
         
         // Copy and sort edges for efficient access only if we have edges
@@ -303,7 +364,7 @@ pub const PersistentEdgeIndex = struct {
             }.lessThan);
         }
         
-        const data_section = mapped_file.mapping[@sizeOf(IndexFileHeader)..];
+        const data_section = mapped_file.mapping[aligned_data_offset..];
         header.checksum = calculateChecksum(data_section);
         try mapped_file.sync();
         
@@ -319,16 +380,38 @@ pub const PersistentEdgeIndex = struct {
         }
         
         const file = &self.mapped_file.?;
-        const header = try file.getHeader();
+        const header = file.getHeader() catch |err| {
+            // Clean up on header read error
+            file.deinit();
+            self.mapped_file = null;
+            return err;
+        };
         
-        if (header.magic != 0x49444558) return error.InvalidMagic;
-        if (header.index_type != .graph_edges) return error.WrongIndexType;
+        if (header.magic != 0x49444558) {
+            file.deinit();
+            self.mapped_file = null;
+            return error.InvalidMagic;
+        }
+        if (header.index_type != .graph_edges) {
+            file.deinit();
+            self.mapped_file = null;
+            return error.WrongIndexType;
+        }
         
-        const data_section = file.mapping[@sizeOf(IndexFileHeader)..];
+        const data_section = file.mapping[header.data_offset..];
         const expected_checksum = calculateChecksum(data_section);
-        if (header.checksum != expected_checksum) return error.ChecksumMismatch;
+        if (header.checksum != expected_checksum) {
+            file.deinit();
+            self.mapped_file = null;
+            return error.ChecksumMismatch;
+        }
         
-        return try file.getDataSlice(types.Edge);
+        return file.getDataSlice(types.Edge) catch |err| {
+            // Clean up on data slice error
+            file.deinit();
+            self.mapped_file = null;
+            return err;
+        };
     }
     
     pub fn exists(self: *const PersistentEdgeIndex) bool {
@@ -362,11 +445,12 @@ pub const PersistentEdgeIndex = struct {
     }
 };
 
-/// Persistent Vector Index - stores vectors in binary format
+/// Persistent Vector Index - stores vectors in binary format with compression
 pub const PersistentVectorIndex = struct {
     mapped_file: ?MappedFile,
     allocator: std.mem.Allocator,
     path: []const u8,
+    compression_engine: ?*compression.CompressionEngine,
     
     pub fn init(allocator: std.mem.Allocator, index_dir: []const u8) !PersistentVectorIndex {
         const path = try std.fs.path.join(allocator, &[_][]const u8{ index_dir, "vectors.idx" });
@@ -375,7 +459,15 @@ pub const PersistentVectorIndex = struct {
             .mapped_file = null,
             .allocator = allocator,
             .path = path,
+            .compression_engine = null,
         };
+    }
+    
+    /// Initialize with compression engine
+    pub fn initWithCompression(allocator: std.mem.Allocator, index_dir: []const u8, compression_engine: *compression.CompressionEngine) !PersistentVectorIndex {
+        var index = try init(allocator, index_dir);
+        index.compression_engine = compression_engine;
+        return index;
     }
     
     pub fn deinit(self: *PersistentVectorIndex) void {
@@ -387,9 +479,29 @@ pub const PersistentVectorIndex = struct {
     
     pub fn create(self: *PersistentVectorIndex, vectors: []const types.Vector) !void {
         const header_size = @sizeOf(IndexFileHeader);
-        const data_size = vectors.len * @sizeOf(types.Vector);
-        const total_size = @max(header_size + data_size, header_size + 1); // Ensure minimum size
+        // Ensure data offset is aligned for Vector structure
+        const vector_alignment = @alignOf(types.Vector);
+        const aligned_data_offset = std.mem.alignForward(usize, header_size, vector_alignment);
+        var data_size = vectors.len * @sizeOf(types.Vector);
+        var compressed_data: ?compression.CompressedVectorData = null;
+        var use_compression = false;
         
+        // Try compression if engine is available and enabled
+        if (self.compression_engine) |engine| {
+            // Only compress if we have a reasonable amount of data
+            if (vectors.len >= 100) {
+                compressed_data = engine.compressVectors(vectors) catch null;
+                if (compressed_data) |comp_data| {
+                    // Use compression if it saves at least 20% space
+                    if (comp_data.compression_ratio >= 1.2) {
+                        data_size = comp_data.compressed_data.len;
+                        use_compression = true;
+                    }
+                }
+            }
+        }
+        
+        const total_size = @max(aligned_data_offset + data_size, header_size + 1); // Ensure minimum size
         var mapped_file = try MappedFile.init(self.allocator, self.path, total_size, 16384);
         
         const header = try mapped_file.getHeaderMutable();
@@ -398,26 +510,44 @@ pub const PersistentVectorIndex = struct {
             .checksum = 0,
             .created_timestamp = @intCast(std.time.timestamp()),
             .item_count = vectors.len,
-            .data_offset = header_size,
+            .data_offset = aligned_data_offset,
+            .compression_method = if (use_compression) .vector_quantized else .none,
+            .compressed_size = if (use_compression) data_size else 0,
+            .original_size = vectors.len * @sizeOf(types.Vector),
         };
         
-        // Copy and sort vectors only if we have vectors
-        if (vectors.len > 0) {
-            const data_slice = try mapped_file.getDataSliceMutable(types.Vector);
-            @memcpy(data_slice[0..vectors.len], vectors);
+        if (use_compression and compressed_data != null) {
+            // Write compressed data
+            const comp_data = compressed_data.?;
+            @memcpy(mapped_file.mapping[aligned_data_offset..aligned_data_offset + data_size], comp_data.compressed_data);
             
-            // Sort vectors by ID for binary search
-            std.sort.pdq(types.Vector, data_slice[0..vectors.len], {}, struct {
-                fn lessThan(_: void, a: types.Vector, b: types.Vector) bool {
-                    return a.id < b.id;
-                }
-            }.lessThan);
+            // Calculate checksum of compressed data
+            const data_section = mapped_file.mapping[aligned_data_offset..aligned_data_offset + data_size];
+            header.checksum = calculateChecksum(data_section);
+            
+            // Clean up compressed data
+            var mut_comp_data = comp_data;
+            mut_comp_data.deinit(self.allocator);
+        } else {
+            // Write uncompressed data (sorted by ID for binary search)
+            if (vectors.len > 0) {
+                const data_slice = try mapped_file.getDataSliceMutable(types.Vector);
+                @memcpy(data_slice[0..vectors.len], vectors);
+                
+                // Sort vectors by ID for binary search
+                std.sort.pdq(types.Vector, data_slice[0..vectors.len], {}, struct {
+                    fn lessThan(_: void, a: types.Vector, b: types.Vector) bool {
+                        return a.id < b.id;
+                    }
+                }.lessThan);
+                
+                // Calculate checksum of uncompressed data
+                const data_section = mapped_file.mapping[aligned_data_offset..];
+                header.checksum = calculateChecksum(data_section);
+            }
         }
         
-        const data_section = mapped_file.mapping[@sizeOf(IndexFileHeader)..];
-        header.checksum = calculateChecksum(data_section);
         try mapped_file.sync();
-        
         self.mapped_file = mapped_file;
     }
     
@@ -435,11 +565,41 @@ pub const PersistentVectorIndex = struct {
         if (header.magic != 0x49444558) return error.InvalidMagic;
         if (header.index_type != .vector_data) return error.WrongIndexType;
         
-        const data_section = file.mapping[@sizeOf(IndexFileHeader)..];
-        const expected_checksum = calculateChecksum(data_section);
-        if (header.checksum != expected_checksum) return error.ChecksumMismatch;
-        
-        return try file.getDataSlice(types.Vector);
+        // Handle compressed data
+        if (header.compression_method != .none) {
+            if (self.compression_engine == null) {
+                return error.CompressionEngineRequired;
+            }
+            
+            const compressed_data_slice = file.mapping[header.data_offset..header.data_offset + header.compressed_size];
+            const expected_checksum = calculateChecksum(compressed_data_slice);
+            if (header.checksum != expected_checksum) return error.ChecksumMismatch;
+            
+            const compressed_data = compression.CompressedVectorData{
+                .compressed_data = @constCast(compressed_data_slice),
+                .original_count = @intCast(header.item_count),
+                .compression_method = header.compression_method,
+                .compression_ratio = @as(f32, @floatFromInt(header.original_size)) / @as(f32, @floatFromInt(header.compressed_size)),
+            };
+            
+            // Decompress and return vectors
+            var decompressed_vectors = try self.compression_engine.?.decompressVectors(&compressed_data);
+            defer decompressed_vectors.deinit();
+            
+            // Store decompressed vectors in a persistent way
+            // Note: This is a simplified approach - in production you might want to cache this
+            const persistent_vectors = try self.allocator.alloc(types.Vector, decompressed_vectors.items.len);
+            @memcpy(persistent_vectors, decompressed_vectors.items);
+            
+            return persistent_vectors;
+        } else {
+            // Handle uncompressed data
+            const data_section = file.mapping[header.data_offset..];
+            const expected_checksum = calculateChecksum(data_section);
+            if (header.checksum != expected_checksum) return error.ChecksumMismatch;
+            
+            return try file.getDataSlice(types.Vector);
+        }
     }
     
     pub fn exists(self: *const PersistentVectorIndex) bool {
@@ -534,10 +694,59 @@ pub const PersistentIndexManager = struct {
             };
         }
         
+        // Load all indexes, handling partial failures gracefully
+        var nodes: []const types.Node = &[_]types.Node{};
+        var edges: []const types.Edge = &[_]types.Edge{};
+        var vectors: []const types.Vector = &[_]types.Vector{};
+        
+        // Load nodes
+        nodes = self.node_index.load() catch |err| {
+            // If node loading fails, return error immediately
+            return err;
+        };
+        errdefer {
+            // Clean up nodes if later operations fail
+            if (self.node_index.mapped_file) |*file| {
+                file.deinit();
+                self.node_index.mapped_file = null;
+            }
+        }
+        
+        // Load edges
+        edges = self.edge_index.load() catch |err| {
+            // Clean up nodes before returning error
+            if (self.node_index.mapped_file) |*file| {
+                file.deinit();
+                self.node_index.mapped_file = null;
+            }
+            return err;
+        };
+        errdefer {
+            // Clean up edges if later operations fail
+            if (self.edge_index.mapped_file) |*file| {
+                file.deinit();
+                self.edge_index.mapped_file = null;
+            }
+        }
+        
+        // Load vectors
+        vectors = self.vector_index.load() catch |err| {
+            // Clean up nodes and edges before returning error
+            if (self.node_index.mapped_file) |*file| {
+                file.deinit();
+                self.node_index.mapped_file = null;
+            }
+            if (self.edge_index.mapped_file) |*file| {
+                file.deinit();
+                self.edge_index.mapped_file = null;
+            }
+            return err;
+        };
+        
         return .{
-            .nodes = try self.node_index.load(),
-            .edges = try self.edge_index.load(),
-            .vectors = try self.vector_index.load(),
+            .nodes = nodes,
+            .edges = edges,
+            .vectors = vectors,
         };
     }
     
@@ -767,7 +976,7 @@ test "PersistentIndexManager with default configuration" {
     try std.testing.expect(manager.config.checksum_validation == true);
     try std.testing.expect(manager.config.auto_cleanup == true);
     try std.testing.expect(manager.config.max_file_size_mb == 1024);
-    try std.testing.expect(manager.config.compression_enable == false);
+    try std.testing.expect(manager.config.compression_enable == true);
     try std.testing.expect(manager.config.sync_on_shutdown == true);
     
     try std.testing.expect(manager.isEnabled() == true);

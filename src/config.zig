@@ -58,21 +58,33 @@ pub const Config = struct {
     memory_stats_enable: bool = true, // Enable memory usage tracking
     error_tracking_enable: bool = true, // Enable error rate tracking
     
-    // Persistent index configuration
-    persistent_index_enable: bool = true, // Enable persistent memory-mapped indexes
+    // Persistent index configuration  
+    persistent_index_enable: bool = true, // Enable persistent indexes for fast startup
+    persistent_index_directory: []const u8 = "indexes", // Directory for index files
     persistent_index_sync_interval: u32 = 100, // Sync indexes to disk every N operations
     persistent_index_auto_rebuild: bool = true, // Automatically rebuild corrupted indexes from log
-    persistent_index_memory_alignment: u32 = 16384, // Memory alignment for mmap operations (bytes)
+    persistent_index_memory_alignment: u32 = 16384, // Memory alignment for mmap operations (16KB)
     persistent_index_checksum_validation: bool = true, // Enable CRC32 checksum validation
     persistent_index_auto_cleanup: bool = true, // Automatically cleanup old index files
     persistent_index_max_file_size_mb: u32 = 1024, // Maximum size per index file (MB)
-    persistent_index_compression_enable: bool = false, // Enable index compression (future feature)
+    persistent_index_compression_enable: bool = true, // Enable index compression
     persistent_index_sync_on_shutdown: bool = true, // Force sync indexes on database shutdown
+    
+    // Compression configuration
+    compression_vector_quantization_scale: f32 = 255.0, // Vector quantization scale factor
+    compression_vector_quantization_offset: f32 = 0.0, // Vector quantization offset
+    compression_enable_delta_encoding: bool = true, // Enable delta encoding for IDs
+    compression_rle_min_run_length: u8 = 3, // Minimum run length for RLE compression
+    compression_enable_checksums: bool = true, // Enable compression checksums
+    compression_parallel_enable: bool = false, // Enable parallel compression (future)
+    compression_level: u8 = 1, // Compression level (1=fast, 9=best compression)
+    compression_min_size_threshold: usize = 1024, // Minimum size to trigger compression (bytes)
+    compression_min_ratio_threshold: f32 = 1.2, // Minimum compression ratio to use compression
     
     // Snapshot system configuration
     snapshot_auto_interval: u32 = 0, // Create snapshot every N operations (0 = disabled)
     snapshot_max_metadata_size_mb: u32 = 10, // Maximum size for snapshot metadata files (MB)
-    snapshot_compression_enable: bool = false, // Enable snapshot compression (future feature)
+    snapshot_compression_enable: bool = true, // Enable snapshot compression
     snapshot_cleanup_keep_count: u32 = 10, // Keep this many snapshots during cleanup
     snapshot_cleanup_auto_enable: bool = true, // Automatically cleanup old snapshots
     snapshot_binary_format_enable: bool = true, // Use binary format for vector data (vs JSON)
@@ -253,9 +265,11 @@ pub const Config = struct {
         } else if (std.mem.eql(u8, key, "error_tracking_enable")) {
             self.error_tracking_enable = try parseBool(value);
         }
-        // Persistent index configuration
+        // Persistent index configuration  
         else if (std.mem.eql(u8, key, "persistent_index_enable")) {
             self.persistent_index_enable = try parseBool(value);
+        } else if (std.mem.eql(u8, key, "persistent_index_directory")) {
+            self.persistent_index_directory = value;
         } else if (std.mem.eql(u8, key, "persistent_index_sync_interval")) {
             self.persistent_index_sync_interval = try parseInt(u32, value);
         } else if (std.mem.eql(u8, key, "persistent_index_auto_rebuild")) {
@@ -272,6 +286,26 @@ pub const Config = struct {
             self.persistent_index_compression_enable = try parseBool(value);
         } else if (std.mem.eql(u8, key, "persistent_index_sync_on_shutdown")) {
             self.persistent_index_sync_on_shutdown = try parseBool(value);
+        }
+        // Compression configuration
+        else if (std.mem.eql(u8, key, "compression_vector_quantization_scale")) {
+            self.compression_vector_quantization_scale = try parseFloat(value);
+        } else if (std.mem.eql(u8, key, "compression_vector_quantization_offset")) {
+            self.compression_vector_quantization_offset = try parseFloat(value);
+        } else if (std.mem.eql(u8, key, "compression_enable_delta_encoding")) {
+            self.compression_enable_delta_encoding = try parseBool(value);
+        } else if (std.mem.eql(u8, key, "compression_rle_min_run_length")) {
+            self.compression_rle_min_run_length = try parseInt(u8, value);
+        } else if (std.mem.eql(u8, key, "compression_enable_checksums")) {
+            self.compression_enable_checksums = try parseBool(value);
+        } else if (std.mem.eql(u8, key, "compression_parallel_enable")) {
+            self.compression_parallel_enable = try parseBool(value);
+        } else if (std.mem.eql(u8, key, "compression_level")) {
+            self.compression_level = try parseInt(u8, value);
+        } else if (std.mem.eql(u8, key, "compression_min_size_threshold")) {
+            self.compression_min_size_threshold = try parseInt(usize, value);
+        } else if (std.mem.eql(u8, key, "compression_min_ratio_threshold")) {
+            self.compression_min_ratio_threshold = try parseFloat(value);
         }
         // Snapshot system configuration
         else if (std.mem.eql(u8, key, "snapshot_auto_interval")) {
@@ -477,6 +511,7 @@ pub const Config = struct {
         try writer.print("\n", .{});
         try writer.print("# Persistent index configuration\n", .{});
         try writer.print("persistent_index_enable = {}\n", .{self.persistent_index_enable});
+        try writer.print("persistent_index_directory = {s}\n", .{self.persistent_index_directory});
         try writer.print("persistent_index_sync_interval = {}\n", .{self.persistent_index_sync_interval});
         try writer.print("persistent_index_auto_rebuild = {}\n", .{self.persistent_index_auto_rebuild});
         try writer.print("persistent_index_memory_alignment = {}\n", .{self.persistent_index_memory_alignment});
@@ -485,6 +520,17 @@ pub const Config = struct {
         try writer.print("persistent_index_max_file_size_mb = {}\n", .{self.persistent_index_max_file_size_mb});
         try writer.print("persistent_index_compression_enable = {}\n", .{self.persistent_index_compression_enable});
         try writer.print("persistent_index_sync_on_shutdown = {}\n", .{self.persistent_index_sync_on_shutdown});
+        try writer.print("\n", .{});
+        try writer.print("# Compression configuration\n", .{});
+        try writer.print("compression_vector_quantization_scale = {}\n", .{self.compression_vector_quantization_scale});
+        try writer.print("compression_vector_quantization_offset = {}\n", .{self.compression_vector_quantization_offset});
+        try writer.print("compression_enable_delta_encoding = {}\n", .{self.compression_enable_delta_encoding});
+        try writer.print("compression_rle_min_run_length = {}\n", .{self.compression_rle_min_run_length});
+        try writer.print("compression_enable_checksums = {}\n", .{self.compression_enable_checksums});
+        try writer.print("compression_parallel_enable = {}\n", .{self.compression_parallel_enable});
+        try writer.print("compression_level = {}\n", .{self.compression_level});
+        try writer.print("compression_min_size_threshold = {}\n", .{self.compression_min_size_threshold});
+        try writer.print("compression_min_ratio_threshold = {}\n", .{self.compression_min_ratio_threshold});
         try writer.print("\n", .{});
         try writer.print("# Snapshot system configuration\n", .{});
         try writer.print("snapshot_auto_interval = {}\n", .{self.snapshot_auto_interval});
@@ -1130,7 +1176,8 @@ test "Config persistent index configuration" {
     const config_str = 
         \\# Persistent index configuration test
         \\persistent_index_enable = true
-        \\persistent_index_sync_interval = 200
+        \\persistent_index_directory = indexes
+        \\persistent_index_sync_interval = 300
         \\persistent_index_auto_rebuild = false
         \\persistent_index_memory_alignment = 32768
         \\persistent_index_checksum_validation = false
@@ -1142,7 +1189,8 @@ test "Config persistent index configuration" {
     
     const config = try Config.parseFromString(config_str);
     try std.testing.expect(config.persistent_index_enable == true);
-    try std.testing.expect(config.persistent_index_sync_interval == 200);
+    try std.testing.expect(std.mem.eql(u8, config.persistent_index_directory, "indexes"));
+    try std.testing.expect(config.persistent_index_sync_interval == 300);
     try std.testing.expect(config.persistent_index_auto_rebuild == false);
     try std.testing.expect(config.persistent_index_memory_alignment == 32768);
     try std.testing.expect(config.persistent_index_checksum_validation == false);
@@ -1161,7 +1209,7 @@ test "Config persistent index default values" {
     try std.testing.expect(config.persistent_index_checksum_validation == true);
     try std.testing.expect(config.persistent_index_auto_cleanup == true);
     try std.testing.expect(config.persistent_index_max_file_size_mb == 1024);
-    try std.testing.expect(config.persistent_index_compression_enable == false);
+    try std.testing.expect(config.persistent_index_compression_enable == true); // Updated: compression now enabled by default
     try std.testing.expect(config.persistent_index_sync_on_shutdown == true);
 }
 
@@ -1216,8 +1264,9 @@ test "Config comprehensive configuration with persistent indexes" {
         \\
         \\# Persistent index settings
         \\persistent_index_enable = true
-        \\persistent_index_sync_interval = 50
-        \\persistent_index_auto_rebuild = true
+        \\persistent_index_directory = indexes
+        \\persistent_index_sync_interval = 600
+        \\persistent_index_auto_rebuild = false
         \\persistent_index_memory_alignment = 65536
         \\persistent_index_checksum_validation = true
         \\persistent_index_auto_cleanup = false
@@ -1276,8 +1325,9 @@ test "Config comprehensive configuration with persistent indexes" {
     
     // Persistent index settings
     try std.testing.expect(config.persistent_index_enable == true);
-    try std.testing.expect(config.persistent_index_sync_interval == 50);
-    try std.testing.expect(config.persistent_index_auto_rebuild == true);
+    try std.testing.expect(std.mem.eql(u8, config.persistent_index_directory, "indexes"));
+    try std.testing.expect(config.persistent_index_sync_interval == 600);
+    try std.testing.expect(config.persistent_index_auto_rebuild == false);
     try std.testing.expect(config.persistent_index_memory_alignment == 65536);
     try std.testing.expect(config.persistent_index_checksum_validation == true);
     try std.testing.expect(config.persistent_index_auto_cleanup == false);
@@ -1326,8 +1376,9 @@ test "Config comprehensive mixed with persistent index configuration" {
         \\
         \\# Persistent index settings
         \\persistent_index_enable = true
-        \\persistent_index_sync_interval = 50
-        \\persistent_index_auto_rebuild = true
+        \\persistent_index_directory = indexes
+        \\persistent_index_sync_interval = 600
+        \\persistent_index_auto_rebuild = false
         \\persistent_index_memory_alignment = 65536
         \\persistent_index_checksum_validation = true
         \\persistent_index_auto_cleanup = false
@@ -1375,8 +1426,9 @@ test "Config comprehensive mixed with persistent index configuration" {
     
     // Persistent index settings
     try std.testing.expect(config.persistent_index_enable == true);
-    try std.testing.expect(config.persistent_index_sync_interval == 50);
-    try std.testing.expect(config.persistent_index_auto_rebuild == true);
+    try std.testing.expect(std.mem.eql(u8, config.persistent_index_directory, "indexes"));
+    try std.testing.expect(config.persistent_index_sync_interval == 600);
+    try std.testing.expect(config.persistent_index_auto_rebuild == false);
     try std.testing.expect(config.persistent_index_memory_alignment == 65536);
     try std.testing.expect(config.persistent_index_checksum_validation == true);
     try std.testing.expect(config.persistent_index_auto_cleanup == false);
@@ -1391,7 +1443,7 @@ test "Config default snapshot and S3 values" {
     // Snapshot defaults
     try std.testing.expect(config.snapshot_auto_interval == 0);
     try std.testing.expect(config.snapshot_max_metadata_size_mb == 10);
-    try std.testing.expect(config.snapshot_compression_enable == false);
+    try std.testing.expect(config.snapshot_compression_enable == true); // Updated: compression now enabled by default
     try std.testing.expect(config.snapshot_cleanup_keep_count == 10);
     try std.testing.expect(config.snapshot_cleanup_auto_enable == true);
     try std.testing.expect(config.snapshot_binary_format_enable == true);
