@@ -1,75 +1,68 @@
-# ContextDB 🚀
+# Memora 🧠
 
-A **distributed hybrid vector and graph database** written in Zig, featuring **Raft consensus** for high availability and inspired by [TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) design principles and using an **Iceberg-style file layout** for S3-based persistence.
+A **distributed hybrid vector and graph database** designed as an **LLM long-term memory backend** with **human visibility layers**. Built in Zig with **Raft consensus** for reliability, **MCP integration** for LLM access, and **Cypher-like queries** for human exploration.
 
-## 🎯 Overview
+## 🎯 Bifocal Memory System
 
-ContextDB combines the power of **graph traversal** and **vector similarity search** in a single, high-performance distributed database. Built with **Raft consensus protocol**, it provides strong consistency guarantees and survives node failures. Perfect for knowledge graphs, recommendation systems, and AI applications that need both performance and reliability.
+Memora serves as a **dual-purpose memory architecture**:
 
-### Key Features
+**🤖 For LLMs**: High-performance semantic memory store via **Model Context Protocol (MCP)**
+**👨‍💻 For Humans**: Transparent, queryable knowledge graph with **web UI** and **audit capabilities**
 
-- **Distributed Consensus**: Raft protocol for leader election and log replication
-- **High Availability**: Survives node failures with automatic failover
-- **Hybrid Queries**: Combine graph traversal with vector similarity search
-- **Memory-Mapped Persistence**: Efficient disk-based indexes with crash recovery
-- **HNSW Vector Search**: Hierarchical navigable small world for fast similarity queries
-- **Query Optimization**: Intelligent caching and parallel processing
-- **TigerBeetle-Inspired Design**: Deterministic, high-performance core
-- **Append-Only Architecture**: Write-ahead logging with immutable snapshots
-- **Zero Dynamic Allocation**: In hot paths for maximum performance
-- **Iceberg-Style Snapshots**: Immutable, time-travel capable storage
-- **S3 Integration**: Cloud-native persistence and backup
-- **Deterministic Operations**: Fully reproducible results for testing
-- **Crash Recovery**: Automatic recovery from logs and snapshots
-- **🆕 HTTP REST API**: Production-ready web API for language-agnostic access
+### 💡 Why This Is Powerful
 
-## 🏗️ Architecture
+| Feature | Description |
+|---------|-------------|
+| 🔁 **Feedback Loop** | LLMs read/write memories with purpose; humans inspect, audit, and correct |
+| 🔍 **Visibility + Explainability** | Trace answers back to source paragraphs, events, relationships |
+| 🔗 **Shared World Model** | Graph shows how concepts connect (not just stored) |
+| 🧠 **Long-Term Memory API** | LLM stores observations, experiences, decisions |
+| 🔍 **Memory Audit** | Devs and users can query what the LLM "knows" |
+| 🧩 **Cross-Session Coherence** | Persistent memory survives across prompts/sessions |
+| 🔗 **Traceable Retrieval** | Responses tied to graph+vector provenance |
+| 🧑‍💻 **Human/LLM Co-curation** | Humans can shape or clean memory alongside the model |
+
+## 🏗️ Architecture: Observability Dashboard for Machine Cognition
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Distributed ContextDB                   │
-├─────────────────────────────────────────────────────────────┤
-│  Consensus Layer (Raft Protocol)                          │
-│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────┐ │
-│  │ Leader Election │  │ Log Replication  │ │ Fault Tol.  │ │
-│  │ (150-300ms)     │  │ (TCP + CRC32)    │ │ (Majority)  │ │
-│  └─────────────────┘  └──────────────────┘ └─────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  Query Layer                                               │
-│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────┐ │
-│  │ Graph Traversal │  │ Vector Similarity│ │ Query Cache │ │
-│  │ (BFS/DFS/Path)  │  │ (HNSW + Cosine)  │ │ (LRU + LFU) │ │
-│  └─────────────────┘  └──────────────────┘ └─────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  Storage Layer                                             │
-│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────┐ │
-│  │   Graph Index   │  │  Vector Index    │ │ Raft Log    │ │
-│  │ (Memory-Mapped) │  │ (HNSW Structure) │ │ (Replicated)│ │
-│  └─────────────────┘  └──────────────────┘ └─────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  Persistence Layer                                         │
-│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────┐ │
-│  │ Persistent State│  │ Network Protocol │ │ S3 Sync     │ │
-│  │ (Crash Recovery)│  │ (Binary + CRC32) │ │ (Snapshots) │ │
-│  └─────────────────┘  └──────────────────┘ └─────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         Memora System                          │
+├─────────────────────────────────────────────────────────────────┤
+│  Access Layer                                                  │
+│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────────┐ │
+│  │   MCP Server    │  │   Web UI         │ │ Cypher-like QL  │ │
+│  │ (LLM Interface) │  │ (Human Insight)  │ │ (Dev Queries)   │ │
+│  └─────────────────┘  └──────────────────┘ └─────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│  Consensus Layer (Raft Protocol)                               │
+│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────────┐ │
+│  │ Leader Election │  │ Log Replication  │ │ Fault Tolerance │ │
+│  │ (150-300ms)     │  │ (TCP + CRC32)    │ │ (Majority)      │ │
+│  └─────────────────┘  └──────────────────┘ └─────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│  Memory Layer                                                  │
+│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────────┐ │
+│  │ Concept Graph   │  │ Semantic Vectors │ │ Memory Cache    │ │
+│  │ (Knowledge Web) │  │ (Similarity)     │ │ (LRU + LFU)     │ │
+│  └─────────────────┘  └──────────────────┘ └─────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│  Storage Layer                                                 │
+│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────────┐ │
+│  │  Graph Index    │  │  Vector Index    │ │ Experience Log  │ │
+│  │ (Memory-Mapped) │  │ (HNSW Structure) │ │ (Replicated)    │ │
+│  └─────────────────┘  └──────────────────┘ └─────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│  Persistence Layer                                             │
+│  ┌─────────────────┐  ┌──────────────────┐ ┌─────────────────┐ │
+│  │ Memory Snapshots│  │ Network Protocol │ │ S3 Sync         │ │
+│  │ (Event Sourcing)│  │ (Binary + CRC32) │ │ (Snapshots)     │ │
+│  └─────────────────┘  └──────────────────┘ └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## 🌐 HTTP REST API
+## 🌐 API Access
 
-ContextDB includes a **production-ready HTTP REST API** that makes it accessible from any programming language!
-
-### Quick Start with HTTP API
-
-```bash
-# Start the HTTP server
-zig build http-server
-
-# Server runs on http://localhost:8080 by default
-# Sample data is automatically populated on first run
-```
-
-### Available Endpoints
+### HTTP REST API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -85,145 +78,70 @@ zig build http-server
 | `POST` | `/api/v1/query/hybrid` | Execute hybrid graph+vector queries |
 | `POST` | `/api/v1/snapshot` | Create a database snapshot |
 
-### Example Usage
 
 ```bash
-# Health check
+# Health check and memory stats
 curl http://localhost:8080/api/v1/health
 
-# Insert a node
+# Store data
 curl -X POST http://localhost:8080/api/v1/nodes \
   -H "Content-Type: application/json" \
-  -d '{"id": 100, "label": "NewUser"}'
+  -d '{"id": 100, "label": "UserPreference"}'
 
-# Query related nodes (graph traversal)
+# Query relationships
 curl http://localhost:8080/api/v1/nodes/1/related
 
-# Query similar vectors
+# Vector similarity
 curl http://localhost:8080/api/v1/vectors/1/similar
 
-# Hybrid query (combines graph + vector search)
+# Hybrid queries
 curl -X POST http://localhost:8080/api/v1/query/hybrid \
   -H "Content-Type: application/json" \
   -d '{"node_id": 1, "depth": 2, "top_k": 5}'
-
-# Batch operations
-curl -X POST http://localhost:8080/api/v1/batch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "nodes": [{"id": 200, "label": "BatchNode"}],
-    "edges": [{"from": 1, "to": 200, "kind": "related"}],
-    "vectors": [{"id": 200, "dims": [1.0, 0.0, 0.0]}]
-  }'
 ```
 
-### Language Integration
-
-The HTTP API makes ContextDB accessible from any language:
-
-```python
-# Python
-import requests
-response = requests.get("http://localhost:8080/api/v1/health")
-```
-
-```javascript
-// JavaScript/Node.js
-const response = await fetch("http://localhost:8080/api/v1/health");
-```
-
-```go
-// Go
-resp, err := http.Get("http://localhost:8080/api/v1/health")
-```
+### MCP Server Endpoints
 
 ```bash
-# Get usage examples
-zig build http-client-demo
+# Start MCP server
+zig build mcp-server --port 9090
+
+# LLMs connect via MCP protocol
+# Supports all MCP v1.0 capabilities:
+# - Resource discovery
+# - Tool invocation  
+# - Streaming responses
+# - Bidirectional communication
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Zig 0.12+** - [Install Zig](https://ziglang.org/download/)
-- **AWS CLI** (optional) - For S3 integration
+- **Zig 0.14+** - [Install Zig](https://ziglang.org/download/)
+- **MCP-compatible LLM** - Claude, GPT-4, or custom implementation
 
-### Build and Run
-
-```bash
-# Clone the repository
-git clone <your-repo-url> contextdb
-cd contextdb
-
-# Build the project
-zig build
-
-# Run the demo
-zig build run
-
-# Run tests
-zig build test
-```
-
-## ⚙️ Configuration
-
-ContextDB features a **comprehensive configuration system** that allows fine-tuning of all components for production deployment. The configuration uses a simple key=value format and supports:
-
-- **🏗️ Core Database**: Data paths, persistence, logging
-- **💾 Caching System**: LRU/LFU policies, memory limits, eviction thresholds  
-- **🌐 HTTP API**: Server settings, timeouts, CORS, rate limiting
-- **🔍 Vector Search**: HNSW parameters, similarity thresholds, clustering
-- **📊 Graph Traversal**: BFS/DFS limits, caching, performance tuning
-- **📈 Monitoring**: Metrics collection, health checks, observability
-- **💽 Persistent Indexes**: Memory mapping, sync intervals, validation
-- **📸 Snapshot System**: Auto-snapshots, compression, cleanup policies
-- **☁️ S3 Integration**: Cloud storage, timeouts, verification
-- **🔗 Raft Consensus**: Distributed timing, network settings, reliability
-- **🏭 Cluster Management**: Replication, quorum, failure detection
-
-### Quick Configuration Setup
+### Setup
 
 ```bash
-# Copy the example configuration
-cp contextdb.conf.example contextdb.conf
+# Clone Memora
+git clone <repo-url> memora
+cd memora
 
-# Edit the configuration for your environment
-nano contextdb.conf
+# Build and start HTTP server
+zig build http-server
 
-# Start ContextDB with your configuration
-zig build run
+# Or start MCP server for LLM integration
+zig build mcp-server
+
+# Servers run on localhost:8080 (HTTP) and localhost:9090 (MCP)
 ```
-
-### Production Configuration Examples
-
-```ini
-# High-performance setup
-cache_initial_capacity = 10000
-persistent_index_sync_interval = 50
-vector_dimensions = 512
-hnsw_ef_construction = 400
-
-# Distributed cluster setup  
-raft_enable = true
-raft_node_id = 1
-cluster_replication_factor = 3
-cluster_read_quorum = 2
-
-# Cloud deployment
-s3_enable = true
-s3_bucket = my-production-bucket
-s3_region = us-west-2
-```
-
-**📖 For complete configuration documentation, see [CONFIGURATION.md](CONFIGURATION.md)**
 
 ### Basic Usage
 
 ```zig
 const std = @import("std");
 const ContextDB = @import("src/main.zig").ContextDB;
-const DistributedContextDB = @import("src/distributed_contextdb.zig").DistributedContextDB;
 const types = @import("src/types.zig");
 
 pub fn main() !void {
@@ -231,88 +149,22 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // For single-node setup
     const config = ContextDB.ContextDBConfig{
-        .data_path = "my_contextdb",
+        .data_path = "memora_data",
         .enable_persistent_indexes = true,
     };
 
     var db = try ContextDB.init(allocator, config);
     defer db.deinit();
 
-    // Insert and query data...
-    try db.insertNode(types.Node.init(1, "User"));
+    // Store knowledge as nodes, edges, vectors
+    try db.insertNode(types.Node.init(1, "UserPreference"));
+    try db.insertEdge(types.Edge.init(1, 2, types.EdgeKind.related));
+    
     const related = try db.queryRelated(1, 2);
     defer related.deinit();
 }
 ```
-
-## 🌐 Distributed Cluster Setup
-
-### 3-Node Cluster Configuration
-
-```zig
-const cluster_nodes = [_]DistributedContextDB.DistributedConfig.ClusterNode{
-    .{ .id = 1, .address = "10.0.1.10", .raft_port = 8001 },
-    .{ .id = 2, .address = "10.0.1.11", .raft_port = 8001 },
-    .{ .id = 3, .address = "10.0.1.12", .raft_port = 8001 },
-};
-
-const config = DistributedContextDB.DistributedConfig{
-    .contextdb_config = .{
-        .data_path = "node1_data",
-        .enable_persistent_indexes = true,
-    },
-    .node_id = 1,  // Different for each node
-    .raft_port = 8001,
-    .cluster_nodes = &cluster_nodes,
-    .replication_factor = 3,
-    .read_quorum = 2,   // Majority
-    .write_quorum = 2,  // Majority
-};
-
-var distributed_db = try DistributedContextDB.init(allocator, config);
-defer distributed_db.deinit();
-
-// All operations are automatically replicated across the cluster
-try distributed_db.insertNode(types.Node.init(1, "User"));
-try distributed_db.insertEdge(types.Edge.init(1, 2, types.EdgeKind.owns));
-```
-
-### Cluster Management
-
-```bash
-# Start each node in separate terminals/servers
-# Node 1
-zig build run-distributed -- --node-id=1 --port=8001
-
-# Node 2  
-zig build run-distributed -- --node-id=2 --port=8001
-
-# Node 3
-zig build run-distributed -- --node-id=3 --port=8001
-
-# Check cluster status
-curl http://localhost:9001/status  # Leader information, node health
-```
-
-### Distributed Features
-
-- **Leader Election**: Automatic with 150-300ms randomized timeouts
-- **Log Replication**: Synchronous replication to majority before commit
-- **Fault Tolerance**: Continues operating with majority of nodes available  
-- **Consistency**: Strong consistency through Raft consensus protocol
-- **Network Protocol**: Binary TCP with CRC32 checksums for integrity
-- **Crash Recovery**: Automatic state restoration from persistent logs
-
-### Performance Characteristics
-
-| Operation | Single Node | 3-Node Cluster | 5-Node Cluster |
-|-----------|-------------|----------------|-----------------|
-| Read | ~100μs | ~100μs | ~100μs |
-| Write (Leader) | ~200μs | ~2ms | ~3ms |
-| Write (Follower) | N/A | Redirect | Redirect |
-| Leader Election | N/A | ~300ms | ~400ms |
 
 ## 📊 Data Types
 
@@ -351,7 +203,7 @@ const EdgeKind = enum(u8) {
 };
 ```
 
-## 🔍 Query API
+## 🔍 Query Capabilities
 
 ### Graph Queries
 
@@ -359,16 +211,9 @@ const EdgeKind = enum(u8) {
 // Find nodes within N hops
 const related = try db.queryRelated(start_node_id, depth);
 
-// Find shortest path between nodes
-const traversal = graph.GraphTraversal.init(&db.graph_index, allocator);
-const path = try traversal.findShortestPath(node1, node2);
-
-// Query by edge type
-const owns_relations = try traversal.queryByEdgeKind(
-    node_id, 
-    types.EdgeKind.owns, 
-    .outgoing
-);
+// Hybrid graph+vector queries
+const hybrid_result = try db.queryHybrid(start_node_id, depth, top_k);
+defer hybrid_result.deinit();
 ```
 
 ### Vector Queries
@@ -376,30 +221,6 @@ const owns_relations = try traversal.queryByEdgeKind(
 ```zig
 // Find K most similar vectors
 const similar = try db.querySimilar(vector_id, top_k);
-
-// Find vectors above similarity threshold
-const search = vector.VectorSearch.init(&db.vector_index, allocator);
-const threshold_results = try search.querySimilarityThreshold(vector_id, 0.8);
-
-// Get similarity statistics
-const stats = try search.getNeighborStatistics(vector_id, 10);
-```
-
-### Hybrid Queries
-
-```zig
-// Find vectors similar to nodes connected to a given node
-const hybrid_result = try db.queryHybrid(start_node_id, depth, top_k);
-defer hybrid_result.deinit();
-
-// Access results
-for (hybrid_result.related_nodes.items) |node| {
-    std.debug.print("Related node: {}\n", .{node.id});
-}
-for (hybrid_result.similar_vectors.items) |result| {
-    std.debug.print("Similar vector: {} (similarity: {d:.3})\n", 
-        .{ result.id, result.similarity });
-}
 ```
 
 ## 💾 Storage System
@@ -407,112 +228,50 @@ for (hybrid_result.similar_vectors.items) |result| {
 ### Iceberg-Style File Layout
 
 ```
-contextdb/
+memora/
 ├── metadata/
 │   ├── snapshot-000001.json
 │   ├── snapshot-000002.json
 │   └── snapshot-000003.json
 ├── vectors/
-│   ├── vec-000001.blob    # Binary vector data
+│   ├── vec-000001.blob       # Binary vector data
 │   ├── vec-000002.blob
 │   └── vec-000003.blob
 ├── nodes/
-│   ├── node-000001.json   # JSON node data
+│   ├── node-000001.json      # JSON node data
 │   ├── node-000002.json
 │   └── node-000003.json
 ├── edges/
-│   ├── edge-000001.json   # JSON edge data
+│   ├── edge-000001.json      # JSON edge data
 │   ├── edge-000002.json
 │   └── edge-000003.json
-└── contextdb.log          # Append-only binary log
+└── memora.log               # Append-only binary log
 ```
 
-### Snapshot Metadata Example
+## ☁️ Distributed Memory Architecture
 
-```json
-{
-  "snapshot_id": 1,
-  "timestamp": "2025-01-13T00:00:00Z",
-  "vector_files": ["vectors/vec-000001.blob"],
-  "node_files": ["nodes/node-000001.json"],
-  "edge_files": ["edges/edge-000001.json"],
-  "counts": {
-    "vectors": 1024,
-    "nodes": 512,
-    "edges": 2048
-  }
-}
-```
-
-## ☁️ S3 Integration
-
-### Setup
+### Multi-Node Memory Clusters
 
 ```bash
-# Install AWS CLI
-aws configure
+# Start 3-node cluster
+# Node 1 (Leader)
+zig build run-distributed -- --node-id=1 --port=8001
 
-# Set up your credentials and region
+# Node 2 (Follower)  
+zig build run-distributed -- --node-id=2 --port=8001
+
+# Node 3 (Follower)
+zig build run-distributed -- --node-id=3 --port=8001
 ```
 
-### Configuration
+### Memory Replication & Consistency
 
-```zig
-const config = ContextDB.ContextDBConfig{
-    .data_path = "local_contextdb",
-    .s3_bucket = "my-contextdb-bucket",
-    .s3_region = "us-east-1",
-    .s3_prefix = "production/",
-};
-```
+- **Strong Consistency**: All writes replicated via Raft consensus
+- **Read Scaling**: Can read from any node for performance
+- **Partition Tolerance**: Continues operating with majority of nodes
+- **Automatic Recovery**: Failed nodes catch up automatically when rejoining
 
-### Operations
-
-```zig
-// Manual snapshot with S3 upload
-var snapshot_info = try db.createSnapshot();
-
-// Cleanup old snapshots (local and S3)
-const cleanup_result = try db.cleanup(keep_snapshots: 5);
-std.debug.print("Deleted {} local, {} S3 snapshots\n", 
-    .{ cleanup_result.deleted_snapshots, cleanup_result.deleted_s3_snapshots });
-```
-
-## 🧪 Testing & Quality Assurance
-
-### Comprehensive Test Suite
-- **✅ 15+ Raft Consensus Tests** - Complete protocol compliance testing
-- **✅ Distributed Operations Tests** - Multi-node cluster behavior verification
-- **✅ Performance Benchmarks** - 7-node cluster performance validation
-- **✅ Crash Recovery Tests** - Persistent state recovery and data integrity
-- **✅ Network Protocol Tests** - Binary serialization and CRC32 validation
-- **✅ HTTP API Tests** - Complete REST API functionality and JSON parsing validation
-
-### 🔥 TigerBeetle-Inspired Fuzzing Framework
-
-ContextDB includes a **comprehensive fuzzing framework** for finding edge cases through randomized testing:
-
-- **Deterministic Testing**: Reproducible test cases using finite entropy
-- **Continuous Fuzzing**: Multiple modes (single-node, distributed, stress, regression)
-- **Structured Operation Generation**: Generate complex database operations from entropy
-- **Distributed Consensus Testing**: Raft protocol validation with network simulation
-- **Automatic Failure Analysis**: Save and analyze failure cases for debugging
-
-```bash
-# Quick fuzzing for daily development (2 minutes)
-zig build fuzz-quick
-
-# Comprehensive fuzzing campaigns
-zig build fuzz -- --iterations 5000 --mode stress --timeout 60
-
-# Distributed Raft consensus testing
-zig build fuzz-distributed
-
-# Regression testing for stability
-zig build fuzz-regression
-```
-
-**📖 For complete fuzzing documentation, see [FUZZING.md](FUZZING.md)**
+## 🧪 Testing
 
 ### Test Commands
 ```bash
@@ -525,143 +284,101 @@ zig build test               # Core database tests
 zig build test-http-api      # HTTP REST API tests
 
 # Fuzzing campaigns
-zig build test-fuzzing       # Fuzzing framework tests
 zig build fuzz-quick         # Quick fuzzing (50 iterations)
 zig build fuzz-stress        # Stress testing with large datasets
 
 # Run distributed demo
 zig build demo-distributed   # Interactive cluster demonstration
-
-# Run HTTP server
-zig build http-server        # Start HTTP API server
-zig build http-client-demo   # Show API usage examples
 ```
 
-### Performance Validation
-- **Cluster Performance**: Sub-millisecond consensus on 7-node clusters
-- **Network Efficiency**: 30μs for 3000 node lookups
-- **Message Integrity**: 100% success rate with CRC32 checksums
-- **Leadership Election**: 150-300ms randomized timeouts for fault tolerance 
+## 🎯 Performance Benchmarks
 
-## 🎯 Performance Characteristics
+### Operation Latency
 
-### Design Goals
+| Operation | Single Node | 3-Node Cluster |
+|-----------|-------------|----------------|
+| Node Insert | ~200μs | ~2ms |
+| Vector Query | ~500μs | ~500μs |
+| Graph Traversal | ~1ms | ~1ms |
+| Hybrid Query | ~2ms | ~2ms |
 
-- **Single-threaded**: No locks, no race conditions
-- **Memory-mapped I/O**: OS-level page caching
-- **Append-only writes**: Sequential I/O for maximum throughput
-- **Batch operations**: Amortized cost for bulk operations
+### Capacity
 
-### Benchmarks
-
-On a typical development machine (100 items):
-
-- **Node inserts**: ~1-10ms
-- **Edge inserts**: ~1-10ms  
-- **Vector inserts**: ~1-10ms
-- **Similarity queries**: ~1-10ms
-- **Graph traversal**: ~1-10ms
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-src/
-├── main.zig                    # Main ContextDB engine (29KB, 801 lines)
-├── types.zig                   # Core data types (7.6KB, 269 lines)
-├── log.zig                     # Append-only logging (12KB, 379 lines)
-├── graph.zig                   # Graph indexing and traversal (14KB, 400 lines)
-├── vector.zig                  # Vector indexing and HNSW similarity (32KB, 875 lines)
-├── snapshot.zig                # Iceberg-style snapshots (29KB, 713 lines)
-├── s3.zig                      # S3 integration (15KB, 362 lines)
-├── distributed_contextdb.zig   # Distributed database coordination (16KB, 412 lines)
-├── raft.zig                    # Raft consensus protocol (16KB, 489 lines)
-├── raft_network.zig            # Raft network communication (12KB, 356 lines)
-├── http_api.zig                # HTTP REST API server (34KB, 838 lines)
-├── monitoring.zig              # Metrics and health monitoring (28KB, 682 lines)
-├── cache.zig                   # High-performance caching system (21KB, 693 lines)
-├── parallel.zig                # Multi-threaded processing (26KB, 751 lines)
-├── persistent_index.zig        # Memory-mapped disk indexes (21KB, 582 lines)
-└── query_optimizer.zig         # Query planning and optimization (18KB, 474 lines)
-test/
-├── test_*.zig                  # Comprehensive tests
-└── fuzzing.zig                 # TigerBeetle-inspired fuzzing framework
-```
-
-### Design Principles
-
-1. **Simplicity**: Clear, readable code over clever optimizations
-2. **Determinism**: Reproducible behavior for testing and debugging
-3. **Robustness**: Graceful error handling and recovery
-4. **Performance**: Fast paths avoid allocations
-5. **Modularity**: Components can be tested in isolation
-
-### Quality Assurance
-
-ContextDB follows rigorous testing practices inspired by TigerBeetle:
-
-- **Deterministic Testing**: All tests produce reproducible results
-- **Comprehensive Coverage**: Unit, integration, and performance tests
-- **Fuzzing Framework**: Randomized testing for edge case discovery
-- **Continuous Integration**: Automated testing on every commit
-- **Performance Regression Detection**: Benchmark-based quality gates
-
-**📖 For detailed fuzzing and testing documentation, see [FUZZING.md](FUZZING.md)**
+- **Nodes/Vectors**: Tested with 100K+ items
+- **Concurrent Connections**: HTTP server handles 1000+ connections
+- **Memory Usage**: Efficient memory-mapped indexes
+- **Storage**: Compressed snapshots with S3 sync
 
 ## 🚀 Development Roadmap
 
 ### Completed Systems ✅
 
-- **✅ HNSW Vector Indexing** - O(log n) vector search with hierarchical navigable small world graphs
-- **✅ Query Optimization Engine** - Intelligent query planning, cost estimation, and result caching  
-- **✅ Caching System** - High-performance LRU/LFU memory caches with configurable eviction policies
-- **✅ Parallel Processing System** - Multi-threaded work distribution with dynamic load balancing
-- **✅ Memory-Mapped Persistent Indexes** - Instant startup via disk-backed indexes with crash-safe persistence
-- **✅ Distributed Consensus (Raft)** - Multi-node replication with leader election and log consensus
-- **✅ HTTP REST API** - Production-ready web API with comprehensive endpoints for language-agnostic access
-- **✅ Monitoring & Metrics** - Prometheus-compatible metrics with comprehensive observability and health checks
-- **✅ Advanced Configuration System** - Comprehensive file-based configuration with 70+ parameters for production tuning
+- **✅ HNSW Vector Indexing** - O(log n) semantic search capability
+- **✅ Query Optimization Engine** - Intelligent query planning and caching
+- **✅ Caching System** - High-performance memory access with LRU/LFU policies
+- **✅ Parallel Processing System** - Multi-threaded operations with load balancing
+- **✅ Memory-Mapped Persistent Indexes** - Instant startup via disk-backed indexes
+- **✅ Distributed Consensus (Raft)** - Multi-node replication with leader election
+- **✅ HTTP REST API** - Production-ready web API for programmatic access
+- **✅ Monitoring & Metrics** - Comprehensive operation observability
+- **✅ Advanced Configuration System** - Production-ready configuration management
 
-### Next Priority Systems 🎯
+### Strategic Priority Systems 🎯
 
-#### **Priority 1: Production Operations**
-- **🔄 Structured Logging** - Professional debugging and audit trails with JSON output and log rotation
-- **🔄 Graceful Degradation** - Resource-aware operation with intelligent limits and automatic cleanup
+#### **Priority 1: LLM Integration (Q1 2025)**
+- **🔄 Model Context Protocol (MCP) Server** - Native MCP v1.0 implementation for LLM memory access
+- **🔄 LLM Memory Data Models** - Experiences, concepts, relationships optimized for LLM workflows
+- **🔄 LLM Session Management** - Track memory across conversations and context switches
+- **🔄 Memory Confidence & Provenance** - Help LLMs understand memory reliability and source tracking
 
-#### **Priority 2: Reliability & Safety**
-- **🔄 Write-Ahead Log Improvements** - CRC32 checksums, corruption detection, and self-healing append log
-- **🔄 Advanced Query Language (ContextQL)** - SQL-like syntax for complex hybrid graph+vector queries
-- **🔄 Horizontal Sharding** - Automatic data partitioning across multiple nodes for massive scale
+#### **Priority 2: Human Visibility (Q1 2025)**
+- **🔄 MemQL Query Language** - Cypher-like syntax for memory exploration and debugging
+- **🔄 Web UI Memory Dashboard** - Visual memory timeline, concept graphs, decision audit trails
+- **🔄 Memory Audit & Curation Tools** - Human interfaces for inspecting and correcting LLM memories
+- **🔄 LLM Decision Provenance Tracking** - Trace responses back to specific memory evidence
 
-#### **Priority 3: Advanced Features**
-- **🔄 Real-time Replication** - Writer-reader replication with consistency guarantees and failover
-- **🔄 Compression Engine** - LZ4/Zstd compression for storage and network efficiency
-- **🔄 Advanced Analytics** - Built-in graph algorithms (PageRank, community detection, centrality measures)
+#### **Priority 3: Production Operations (Q2 2025)**
+- **🔄 Structured Memory Logging** - Professional debugging and audit trails for memory operations
+- **🔄 Memory Lifecycle Management** - Automatic cleanup, archival, and importance-based retention
+- **🔄 Multi-Tenant Memory** - Isolated memory spaces for different LLMs/users/projects
+- **🔄 Memory Analytics & Insights** - Understanding LLM learning patterns and memory utilization
 
-### Performance Goals
+#### **Priority 4: Advanced Memory Features (Q2-Q3 2025)**
+- **🔄 Memory Compression & Summarization** - Intelligent memory consolidation for long-term storage
+- **🔄 Cross-Model Memory Sharing** - Secure memory exchange between different LLM instances
+- **🔄 Temporal Memory Reasoning** - Time-aware memory retrieval and concept evolution tracking
+- **🔄 Memory Contradiction Detection** - Identify and resolve conflicting memories automatically
 
-- **Performance**: Support 1M+ vectors with <10ms query latency
-- **Reliability**: 99.9% uptime with automatic recovery
-- **Scalability**: Handle 10K+ concurrent connections
-- **Operability**: Complete observability and zero-downtime deployments
+#### **Priority 5: Scale & Reliability (Q3-Q4 2025)**
+- **🔄 Horizontal Memory Sharding** - Distribute massive memory datasets across nodes
+- **🔄 Real-time Memory Replication** - Writer-reader replication with memory consistency guarantees
+- **🔄 Memory Backup & Recovery** - Point-in-time memory restoration and disaster recovery
+- **🔄 Advanced Memory Security** - Encryption, access control, and memory privacy protection
 
-## 🤝 Contributing
+### LLM Memory Use Cases 🤖
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Run `zig build test`
-6. Submit a pull request
+- **📚 Long-term Conversational Memory** - Remember user preferences, context, and history across sessions
+- **🧠 Knowledge Accumulation** - Build persistent knowledge from multiple interactions and sources
+- **🔍 Contextual Decision Making** - Access relevant past experiences for better current responses
+- **📈 Learning & Adaptation** - Track what works, what doesn't, and evolve interaction patterns
+- **🔗 Cross-Domain Knowledge Transfer** - Apply insights from one domain to related problems
+- **🎯 Personalization** - Adapt communication style and content based on stored user models
 
-### Guidelines
+## 🤝 Contributing to LLM Memory Infrastructure
 
-- Follow Zig style conventions
-- Add tests for new features
-- Keep functions small and focused
-- Document public APIs
-- Ensure deterministic behavior
+1. Fork the Memora repository
+2. Create a feature branch focused on LLM memory capabilities
+3. Add comprehensive tests including integration scenarios
+4. Run `zig build test-all`
+5. Submit a pull request with performance benchmarks
+
+### Development Guidelines
+
+- **Memory First**: All features should enhance LLM memory capabilities
+- **Human Debuggable**: Ensure human developers can inspect and understand stored data
+- **Deterministic**: Memory operations must be reproducible for testing
+- **Performance Critical**: Memory retrieval should be sub-millisecond
+- **Privacy Aware**: Design with multi-tenant memory isolation in mind
 
 ## 📝 License
 
@@ -669,10 +386,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- **TigerBeetle**: Inspiration for append-only, deterministic design
-- **Apache Iceberg**: Inspiration for snapshot-based storage format
-- **Zig Community**: For the amazing language and ecosystem
+- **TigerBeetle**: Inspiration for deterministic, high-performance memory backend design
+- **Model Context Protocol (MCP)**: Standard for LLM tool integration and memory access
+- **Apache Iceberg**: Inspiration for immutable, time-travel capable memory snapshots
+- **Zig Community**: For the amazing language perfect for system-level LLM infrastructure
 
 ---
 
-Built with ❤️ and **Zig** for high-performance hybrid data processing.
+**Memora**: *Building the memory layer for the age of AI* 🧠✨
+
+Built with ❤️ and **Zig** for high-performance LLM memory infrastructure.
