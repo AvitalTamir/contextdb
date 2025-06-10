@@ -94,3 +94,5 @@ docs/build/
 # Local configuration overrides
 config.local.*
 .env.local 
+
+memora_mcp_data/
