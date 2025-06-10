@@ -13,7 +13,7 @@ pub const parallel = @import("parallel.zig");
 pub const persistent_index = @import("persistent_index.zig");
 pub const raft = @import("raft.zig");
 pub const raft_network = @import("raft_network.zig");
-pub const distributed_contextdb = @import("distributed_contextdb.zig");
+pub const distributed_memora = @import("distributed_memora.zig");
 pub const http_api = @import("http_api.zig");
 pub const monitoring = @import("monitoring.zig");
 pub const config_mod = @import("config.zig");
@@ -29,9 +29,9 @@ const snapshot_local = snapshot;
 const s3_local = s3;
 const persistent_index_local = persistent_index;
 
-/// ContextDB - A hybrid vector and graph database
+/// Memora - A hybrid vector and graph database
 /// Inspired by TigerBeetle's design with Iceberg-style snapshots
-pub const ContextDB = struct {
+pub const Memora = struct {
     allocator: std.mem.Allocator,
     
     // Core components
@@ -54,11 +54,11 @@ pub const ContextDB = struct {
     s3_sync: ?s3.S3SnapshotSync,
     
     // Configuration
-    config: ContextDBConfig,
+    config: MemoraConfig,
 
-    pub fn init(allocator: std.mem.Allocator, config: ContextDBConfig, global_config: ?config_mod.Config) !ContextDB {
+    pub fn init(allocator: std.mem.Allocator, config: MemoraConfig, global_config: ?config_mod.Config) !Memora {
         // Initialize append log
-        const log_path = try std.fs.path.join(allocator, &[_][]const u8{ config.data_path, "contextdb.log" });
+        const log_path = try std.fs.path.join(allocator, &[_][]const u8{ config.data_path, "memora.log" });
         defer allocator.free(log_path);
         
         const append_log = try log_local.AppendLog.init(allocator, log_path, global_config);
@@ -108,7 +108,7 @@ pub const ContextDB = struct {
         else 
             null;
 
-        var db = ContextDB{
+        var db = Memora{
             .allocator = allocator,
             .append_log = append_log,
             .graph_index = graph_index,
@@ -128,7 +128,7 @@ pub const ContextDB = struct {
         return db;
     }
 
-    pub fn deinit(self: *ContextDB) void {
+    pub fn deinit(self: *Memora) void {
         self.append_log.deinit();
         self.graph_index.deinit();
         self.vector_index.deinit();
@@ -138,7 +138,7 @@ pub const ContextDB = struct {
     }
 
     /// Insert a node into the database
-    pub fn insertNode(self: *ContextDB, node: types.Node) !void {
+    pub fn insertNode(self: *Memora, node: types.Node) !void {
         const start_time = std.time.nanoTimestamp();
         
         // Write to log first (write-ahead logging)
@@ -166,7 +166,7 @@ pub const ContextDB = struct {
     }
 
     /// Insert an edge into the database
-    pub fn insertEdge(self: *ContextDB, edge: types.Edge) !void {
+    pub fn insertEdge(self: *Memora, edge: types.Edge) !void {
         const start_time = std.time.nanoTimestamp();
         
         // Write to log first
@@ -194,7 +194,7 @@ pub const ContextDB = struct {
     }
 
     /// Insert a vector into the database
-    pub fn insertVector(self: *ContextDB, vec: types.Vector) !void {
+    pub fn insertVector(self: *Memora, vec: types.Vector) !void {
         const start_time = std.time.nanoTimestamp();
         
         // Write to log first
@@ -222,7 +222,7 @@ pub const ContextDB = struct {
     }
 
     /// Batch insert multiple items efficiently
-    pub fn insertBatch(self: *ContextDB, nodes: []const types.Node, edges: []const types.Edge, vectors: []const types.Vector) !void {
+    pub fn insertBatch(self: *Memora, nodes: []const types.Node, edges: []const types.Edge, vectors: []const types.Vector) !void {
         var batch_writer = log.BatchWriter.init(self.allocator, 1000);
         defer batch_writer.deinit();
 
@@ -250,7 +250,7 @@ pub const ContextDB = struct {
     }
 
     /// Query similar vectors using vector search
-    pub fn querySimilar(self: *ContextDB, vector_id: u64, top_k: u32) !std.ArrayList(types.SimilarityResult) {
+    pub fn querySimilar(self: *Memora, vector_id: u64, top_k: u32) !std.ArrayList(types.SimilarityResult) {
         const start_time = std.time.nanoTimestamp();
         
         const result = self.vector_search.querySimilar(&self.vector_index, vector_id, top_k) catch |err| {
@@ -266,7 +266,7 @@ pub const ContextDB = struct {
     }
 
     /// Query related nodes using graph traversal
-    pub fn queryRelated(self: *ContextDB, start_node_id: u64, depth: u8) !std.ArrayList(types.Node) {
+    pub fn queryRelated(self: *Memora, start_node_id: u64, depth: u8) !std.ArrayList(types.Node) {
         const start_time = std.time.nanoTimestamp();
         
         const result = self.graph_traversal.queryRelated(&self.graph_index, start_node_id, @as(?u8, depth)) catch |err| {
@@ -282,7 +282,7 @@ pub const ContextDB = struct {
     }
 
     /// Advanced query: find vectors similar to nodes connected to a given node
-    pub fn queryHybrid(self: *ContextDB, start_node_id: u64, depth: u8, top_k: u32) !HybridQueryResult {
+    pub fn queryHybrid(self: *Memora, start_node_id: u64, depth: u8, top_k: u32) !HybridQueryResult {
         const start_time = std.time.nanoTimestamp();
         
         // First, find related nodes
@@ -355,7 +355,7 @@ pub const ContextDB = struct {
     }
 
     /// Create a snapshot manually
-    pub fn createSnapshot(self: *ContextDB) !snapshot.SnapshotInfo {
+    pub fn createSnapshot(self: *Memora) !snapshot.SnapshotInfo {
         // Sync log to disk first
         try self.append_log.sync();
 
@@ -387,7 +387,7 @@ pub const ContextDB = struct {
     }
 
     /// Load from S3 if available, otherwise from local snapshots
-    pub fn loadFromStorage(self: *ContextDB) !void {
+    pub fn loadFromStorage(self: *Memora) !void {
         // Try to load from S3 first if configured
         if (self.s3_sync) |*s3_client| {
             if (self.config.s3_prefix) |prefix| {
@@ -409,7 +409,7 @@ pub const ContextDB = struct {
     }
 
     /// Get database statistics
-    pub fn getStats(self: *ContextDB) types.DatabaseStats {
+    pub fn getStats(self: *Memora) types.DatabaseStats {
         const snapshot_count = if (self.snapshot_manager.listSnapshots()) |snapshots| blk: {
             defer snapshots.deinit();
             break :blk snapshots.items.len;
@@ -435,7 +435,7 @@ pub const ContextDB = struct {
     }
 
     /// Cleanup old data (snapshots and logs)
-    pub fn cleanup(self: *ContextDB, keep_snapshots: u32) !CleanupResult {
+    pub fn cleanup(self: *Memora, keep_snapshots: u32) !CleanupResult {
         var result = CleanupResult{ .deleted_snapshots = 0, .deleted_s3_snapshots = 0 };
 
         // Clean up local snapshots
@@ -453,7 +453,7 @@ pub const ContextDB = struct {
 
     // Private methods
 
-    fn autoSnapshot(self: *ContextDB) !void {
+    fn autoSnapshot(self: *Memora) !void {
         // Use the snapshot manager's configuration for auto interval
         if (self.snapshot_manager.config.auto_interval > 0) {
             const current_entries = self.append_log.getEntryCount();
@@ -469,7 +469,7 @@ pub const ContextDB = struct {
         }
     }
 
-    fn loadFromS3(self: *ContextDB, s3_client: *s3.S3SnapshotSync, prefix: []const u8) !void {
+    fn loadFromS3(self: *Memora, s3_client: *s3.S3SnapshotSync, prefix: []const u8) !void {
         const remote_snapshots = try s3_client.listRemoteSnapshots(prefix);
         defer remote_snapshots.deinit();
 
@@ -485,7 +485,7 @@ pub const ContextDB = struct {
         }
     }
 
-    fn loadFromSnapshot(self: *ContextDB, snapshot_info: *const snapshot.SnapshotInfo) !void {
+    fn loadFromSnapshot(self: *Memora, snapshot_info: *const snapshot.SnapshotInfo) !void {
         // Clear existing indexes
         self.graph_index.deinit();
         self.vector_index.deinit();
@@ -515,7 +515,7 @@ pub const ContextDB = struct {
         }
     }
 
-    fn replayFromLog(self: *ContextDB) !void {
+    fn replayFromLog(self: *Memora) !void {
         var iter = self.append_log.iterator();
         
         while (iter.next()) |entry| {
@@ -539,7 +539,7 @@ pub const ContextDB = struct {
         }
     }
 
-    fn getAllVectors(self: *ContextDB) !std.ArrayList(types.Vector) {
+    fn getAllVectors(self: *Memora) !std.ArrayList(types.Vector) {
         var vectors = std.ArrayList(types.Vector).init(self.allocator);
         
         for (self.vector_index.vector_list.items) |vec| {
@@ -549,7 +549,7 @@ pub const ContextDB = struct {
         return vectors;
     }
 
-    fn getAllNodes(self: *ContextDB) !std.ArrayList(types.Node) {
+    fn getAllNodes(self: *Memora) !std.ArrayList(types.Node) {
         var nodes = std.ArrayList(types.Node).init(self.allocator);
         
         var iter = self.graph_index.nodes.iterator();
@@ -560,7 +560,7 @@ pub const ContextDB = struct {
         return nodes;
     }
 
-    fn getAllEdges(self: *ContextDB) !std.ArrayList(types.Edge) {
+    fn getAllEdges(self: *Memora) !std.ArrayList(types.Edge) {
         var edges = std.ArrayList(types.Edge).init(self.allocator);
         
         var iter = self.graph_index.outgoing_edges.iterator();
@@ -574,7 +574,7 @@ pub const ContextDB = struct {
     }
 
     /// Load data from storage with persistent index fast path
-    fn loadFromStorageWithPersistentIndexes(self: *ContextDB) !void {
+    fn loadFromStorageWithPersistentIndexes(self: *Memora) !void {
         if (!self.persistent_index_manager.isEnabled()) {
             // Fall back to normal loading if persistent indexes disabled
             return self.loadFromStorage();
@@ -611,7 +611,7 @@ pub const ContextDB = struct {
     }
     
     /// Load persistent data into in-memory indexes
-    fn loadFromPersistentData(self: *ContextDB, persistent_data: anytype) !void {
+    fn loadFromPersistentData(self: *Memora, persistent_data: anytype) !void {
         // Load nodes
         for (persistent_data.nodes) |node| {
             try self.graph_index.addNode(node);
@@ -629,7 +629,7 @@ pub const ContextDB = struct {
     }
     
     /// Replay log entries that occurred since last persistent index save
-    fn replayLogSinceLastIndexSave(self: *ContextDB) !void {
+    fn replayLogSinceLastIndexSave(self: *Memora) !void {
         // Get timestamp of last persistent index update
         const index_stats = try self.persistent_index_manager.getStats();
         _ = index_stats; // For now, replay all log entries
@@ -639,7 +639,7 @@ pub const ContextDB = struct {
     }
     
     /// Save current in-memory indexes to persistent storage
-    pub fn savePersistentIndexes(self: *ContextDB) !void {
+    pub fn savePersistentIndexes(self: *Memora) !void {
         if (!self.persistent_index_manager.isEnabled()) return;
         
         const start_time = std.time.nanoTimestamp();
@@ -664,7 +664,7 @@ pub const ContextDB = struct {
     }
     
     /// Check if persistent indexes should be synced
-    fn shouldSyncPersistentIndexes(self: *ContextDB) bool {
+    fn shouldSyncPersistentIndexes(self: *Memora) bool {
         if (!self.persistent_index_manager.isEnabled()) return false;
         
         if (self.persistent_index_manager.config.sync_interval > 0) {
@@ -676,7 +676,7 @@ pub const ContextDB = struct {
     }
 };
 
-pub const ContextDBConfig = struct {
+pub const MemoraConfig = struct {
     data_path: []const u8,
     auto_snapshot_interval: ?u64 = null, // Create snapshot every N log entries
     s3_bucket: ?[]const u8 = null,
@@ -711,18 +711,18 @@ fn compareByDescendingSimilarity(context: void, a: types.SimilarityResult, b: ty
     return a.similarity > b.similarity;
 }
 
-/// Demo function showing ContextDB usage
+/// Demo function showing Memora usage
 pub fn demo() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Clean up any existing demo data
-    std.fs.cwd().deleteTree("demo_contextdb") catch {};
+    std.fs.cwd().deleteTree("demo_memora") catch {};
 
-    // Configure ContextDB
-    const config = ContextDBConfig{
-        .data_path = "demo_contextdb",
+    // Configure Memora
+    const config = MemoraConfig{
+        .data_path = "demo_memora",
         .auto_snapshot_interval = 10, // Snapshot every 10 operations
         .s3_bucket = null, // No S3 for demo
         .s3_region = null,
@@ -730,11 +730,11 @@ pub fn demo() !void {
     };
 
     // Initialize database
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
-    defer std.fs.cwd().deleteTree("demo_contextdb") catch {};
+    defer std.fs.cwd().deleteTree("demo_memora") catch {};
 
-    std.debug.print("ContextDB Demo Started\n", .{});
+    std.debug.print("Memora Demo Started\n", .{});
 
     // Insert some nodes
     try db.insertNode(types.Node.init(1, "Person"));
@@ -793,30 +793,30 @@ pub fn demo() !void {
     std.debug.print("  Log entries: {}\n", .{stats.log_entry_count});
     std.debug.print("  Snapshots: {}\n", .{stats.snapshot_count});
 
-    std.debug.print("ContextDB Demo Completed Successfully!\n", .{});
+    std.debug.print("Memora Demo Completed Successfully!\n", .{});
 }
 
 pub fn main() !void {
-    std.debug.print("ContextDB - A high-performance context-aware database\\n", .{});
+    std.debug.print("Memora - A high-performance context-aware database\\n", .{});
 }
 
-test "ContextDB basic operations" {
+test "Memora basic operations" {
     const allocator = std.testing.allocator;
     
     // Clean up any existing test data
-    std.fs.cwd().deleteTree("test_contextdb") catch {};
+    std.fs.cwd().deleteTree("test_memora") catch {};
     
-    const config = ContextDBConfig{
-        .data_path = "test_contextdb",
+    const config = MemoraConfig{
+        .data_path = "test_memora",
         .auto_snapshot_interval = null,
         .s3_bucket = null,
         .s3_region = null,
         .s3_prefix = null,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
-    defer std.fs.cwd().deleteTree("test_contextdb") catch {};
+    defer std.fs.cwd().deleteTree("test_memora") catch {};
 
     // Test insertions
     try db.insertNode(types.Node.init(1, "TestNode"));

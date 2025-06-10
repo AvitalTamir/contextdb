@@ -199,7 +199,7 @@ pub const S3Client = struct {
     }
 };
 
-/// High-level S3 operations for ContextDB snapshots
+/// High-level S3 operations for Memora snapshots
 pub const S3SnapshotSync = struct {
     s3_client: S3Client,
     allocator: std.mem.Allocator,
@@ -211,12 +211,12 @@ pub const S3SnapshotSync = struct {
         };
     }
 
-    /// Upload entire ContextDB directory to S3
+    /// Upload entire Memora directory to S3
     pub fn uploadDatabase(self: *const S3SnapshotSync, local_db_path: []const u8, s3_prefix: []const u8) !void {
         try self.s3_client.uploadDirectory(local_db_path, s3_prefix);
     }
 
-    /// Download entire ContextDB directory from S3
+    /// Download entire Memora directory from S3
     pub fn downloadDatabase(self: *const S3SnapshotSync, s3_prefix: []const u8, local_db_path: []const u8) !void {
         // Ensure local directory exists
         try std.fs.cwd().makePath(local_db_path);
@@ -421,7 +421,7 @@ test "S3Config default values" {
     try std.testing.expect(s3_cfg.enable == false);
     try std.testing.expect(std.mem.eql(u8, s3_cfg.bucket, ""));
     try std.testing.expect(std.mem.eql(u8, s3_cfg.region, "us-east-1"));
-    try std.testing.expect(std.mem.eql(u8, s3_cfg.prefix, "contextdb/"));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.prefix, "memora/"));
     try std.testing.expect(s3_cfg.upload_timeout_ms == 300000);
     try std.testing.expect(s3_cfg.download_timeout_ms == 180000);
     try std.testing.expect(s3_cfg.max_retries == 3);
@@ -436,7 +436,7 @@ test "S3SnapshotSync configuration integration" {
     // Create a comprehensive global config with S3 settings
     const global_config = config.Config{
         .s3_enable = true,
-        .s3_bucket = "production-contextdb",
+        .s3_bucket = "production-memora",
         .s3_region = "us-west-2",
         .s3_prefix = "prod/v1/",
         .s3_upload_timeout_ms = 600000,
@@ -450,7 +450,7 @@ test "S3SnapshotSync configuration integration" {
     // Test S3Config.fromConfig
     const s3_cfg = S3Config.fromConfig(global_config);
     try std.testing.expect(s3_cfg.enable == true);
-    try std.testing.expect(std.mem.eql(u8, s3_cfg.bucket, "production-contextdb"));
+    try std.testing.expect(std.mem.eql(u8, s3_cfg.bucket, "production-memora"));
     try std.testing.expect(std.mem.eql(u8, s3_cfg.region, "us-west-2"));
     try std.testing.expect(std.mem.eql(u8, s3_cfg.prefix, "prod/v1/"));
     try std.testing.expect(s3_cfg.upload_timeout_ms == 600000);
@@ -462,7 +462,7 @@ test "S3SnapshotSync configuration integration" {
     
     // Test S3SnapshotSync with configuration
     const s3_sync = S3SnapshotSync.init(allocator, s3_cfg.bucket, s3_cfg.region);
-    try std.testing.expect(std.mem.eql(u8, s3_sync.s3_client.bucket_name, "production-contextdb"));
+    try std.testing.expect(std.mem.eql(u8, s3_sync.s3_client.bucket_name, "production-memora"));
     try std.testing.expect(std.mem.eql(u8, s3_sync.s3_client.region, "us-west-2"));
     
     std.debug.print("✓ S3 configuration integration test passed\n", .{});

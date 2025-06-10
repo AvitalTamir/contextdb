@@ -1,11 +1,11 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
+const memora = @import("memora");
 
-const ContextDB = contextdb.ContextDB;
-const ContextDBConfig = contextdb.ContextDBConfig;
-const mcp_server = contextdb.mcp_server;
-const types = contextdb.types;
+const Memora = memora.Memora;
+const MemoraConfig = memora.MemoraConfig;
+const mcp_server = memora.mcp_server;
+const types = memora.types;
 
 test "MCP server initialization" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -17,13 +17,13 @@ test "MCP server initialization" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server
@@ -49,13 +49,13 @@ test "MCP JSON-RPC initialize request" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server
@@ -105,13 +105,13 @@ test "MCP ping request" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server
@@ -154,13 +154,13 @@ test "MCP resources/list request" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server
@@ -208,13 +208,13 @@ test "MCP resources/read stats request" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Add some test data
@@ -280,13 +280,13 @@ test "MCP tools/list request" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server
@@ -334,13 +334,13 @@ test "MCP store_memory tool call" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server
@@ -394,13 +394,13 @@ test "MCP error handling - invalid JSON" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server
@@ -439,13 +439,13 @@ test "MCP error handling - method not found" {
     defer std.fs.cwd().deleteTree("test_mcp_data") catch {};
 
     // Create test database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_mcp_data",
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initialize MCP server

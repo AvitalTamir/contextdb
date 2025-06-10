@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Centralized configuration system for ContextDB
+/// Centralized configuration system for Memora
 /// Uses simple key=value format for easy parsing without external dependencies
 pub const Config = struct {
     // Log configuration
@@ -95,7 +95,7 @@ pub const Config = struct {
     s3_enable: bool = false, // Enable S3 integration
     s3_bucket: []const u8 = "", // S3 bucket name
     s3_region: []const u8 = "us-east-1", // AWS region
-    s3_prefix: []const u8 = "contextdb/", // S3 prefix for all files
+    s3_prefix: []const u8 = "memora/", // S3 prefix for all files
     s3_upload_timeout_ms: u32 = 300000, // Upload timeout in milliseconds (5 minutes)
     s3_download_timeout_ms: u32 = 180000, // Download timeout in milliseconds (3 minutes)
     s3_max_retries: u32 = 3, // Maximum retry attempts for S3 operations
@@ -453,7 +453,7 @@ pub const Config = struct {
 
         const writer = file.writer();
         
-        try writer.print("# ContextDB Configuration\n", .{});
+        try writer.print("# Memora Configuration\n", .{});
         try writer.print("# Log settings\n", .{});
         try writer.print("log_initial_size = {}\n", .{self.log_initial_size});
         try writer.print("log_max_size = {}\n", .{self.log_max_size});
@@ -1454,7 +1454,7 @@ test "Config default snapshot and S3 values" {
     try std.testing.expect(config.s3_enable == false);
     try std.testing.expect(std.mem.eql(u8, config.s3_bucket, ""));
     try std.testing.expect(std.mem.eql(u8, config.s3_region, "us-east-1"));
-    try std.testing.expect(std.mem.eql(u8, config.s3_prefix, "contextdb/"));
+    try std.testing.expect(std.mem.eql(u8, config.s3_prefix, "memora/"));
     try std.testing.expect(config.s3_upload_timeout_ms == 300000);
     try std.testing.expect(config.s3_download_timeout_ms == 180000);
     try std.testing.expect(config.s3_max_retries == 3);

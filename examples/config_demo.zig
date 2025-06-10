@@ -1,14 +1,14 @@
 const std = @import("std");
-const contextdb = @import("contextdb");
-const config = contextdb.config;
-const log = contextdb.log;
+const memora = @import("memora");
+const config = memora.config;
+const log = memora.log;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("ContextDB Configuration System Demo\n");
+    std.debug.print("Memora Configuration System Demo\n");
     std.debug.print("====================================\n\n");
 
     // Demo 1: Default configuration

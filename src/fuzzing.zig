@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("main.zig");
+const memora = @import("main.zig");
 const types = @import("types.zig");
 const raft = @import("raft.zig");
 
@@ -432,12 +432,12 @@ pub const FuzzFramework = struct {
         defer std.fs.cwd().deleteTree(test_dir) catch {};
         
         // Initialize database
-        const db_config = contextdb.ContextDBConfig{
+        const db_config = memora.MemoraConfig{
             .data_path = test_dir,
             .enable_persistent_indexes = true,
         };
         
-        var db = contextdb.ContextDB.init(self.allocator, db_config, null) catch {
+        var db = memora.Memora.init(self.allocator, db_config, null) catch {
             const duration = @as(u64, @intCast(std.time.nanoTimestamp() - start_time));
             return FuzzResult.failure_result(
                 "Failed to initialize database",

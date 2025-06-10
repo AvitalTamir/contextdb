@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Core data types for ContextDB
+/// Core data types for Memora
 pub const Node = struct {
     id: u64,
     label: [32]u8,

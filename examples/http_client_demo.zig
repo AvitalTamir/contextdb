@@ -1,14 +1,14 @@
 const std = @import("std");
 
-/// HTTP Client Demo for ContextDB API
-/// This demonstrates how to interact with the ContextDB HTTP API
+/// HTTP Client Demo for Memora API
+/// This demonstrates how to interact with the Memora HTTP API
 /// Run the HTTP server first with: zig build http-server
 pub fn main() !void {
     const demo_text = 
-        \\ContextDB HTTP API Client Demo
+        \\Memora HTTP API Client Demo
         \\===============================
         \\
-        \\Make sure to start the ContextDB HTTP server first:
+        \\Make sure to start the Memora HTTP server first:
         \\  zig build http-server
         \\
         \\Here are example curl commands to interact with the API:
@@ -107,7 +107,7 @@ pub fn main() !void {
         \\2. Try the curl commands above
         \\3. Check the health endpoint to see sample data
         \\4. Experiment with your own data!
-        \\5. Build applications that integrate with ContextDB via HTTP
+        \\5. Build applications that integrate with Memora via HTTP
         \\
         \\Happy querying! 🚀
         \\

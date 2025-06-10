@@ -1,6 +1,6 @@
 const std = @import("std");
-const contextdb = @import("contextdb");
-const fuzzing = contextdb.fuzzing;
+const memora = @import("memora");
+const fuzzing = memora.fuzzing;
 
 // =============================================================================
 // CLI Fuzzing Campaign Runner
@@ -35,7 +35,7 @@ const FuzzOptions = struct {
 
 fn printUsage(program_name: []const u8) void {
     std.debug.print(
-        \\ContextDB Fuzzing Campaign Runner
+        \\Memora Fuzzing Campaign Runner
         \\
         \\Usage: {s} [options]
         \\
@@ -252,7 +252,7 @@ fn runRegressionCampaign(allocator: std.mem.Allocator, options: FuzzOptions) !vo
     
     if (failed > 0) {
         std.debug.print("⚠️  WARNING: {} regression test(s) failed!\n", .{failed});
-        std.debug.print("   This indicates a potential regression in ContextDB.\n", .{});
+        std.debug.print("   This indicates a potential regression in Memora.\n", .{});
         std.debug.print("   Check the saved failure cases in '{s}' for details.\n", .{options.save_dir});
     } else {
         std.debug.print("✅ All regression tests passed!\n", .{});

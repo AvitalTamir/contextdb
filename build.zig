@@ -4,13 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Create the ContextDB module
-    const contextdb_module = b.addModule("contextdb", .{
+    // Create the Memora module
+    const memora_module = b.addModule("memora", .{
         .root_source_file = b.path("src/main.zig"),
     });
 
     const exe = b.addExecutable(.{
-        .name = "contextdb",
+        .name = "memora",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
@@ -35,8 +35,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the tests
-    unit_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the tests
+    unit_tests.root_module.addImport("memora", memora_module);
 
     // HNSW tests
     const hnsw_tests = b.addTest(.{
@@ -45,8 +45,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the HNSW tests
-    hnsw_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the HNSW tests
+    hnsw_tests.root_module.addImport("memora", memora_module);
 
     // Basic HNSW tests (without memory leaks)
     const hnsw_basic_tests = b.addTest(.{
@@ -55,8 +55,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the basic HNSW tests
-    hnsw_basic_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the basic HNSW tests
+    hnsw_basic_tests.root_module.addImport("memora", memora_module);
 
     // Query Optimizer tests
     const query_optimizer_tests = b.addTest(.{
@@ -65,8 +65,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the query optimizer tests
-    query_optimizer_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the query optimizer tests
+    query_optimizer_tests.root_module.addImport("memora", memora_module);
 
     // Cache tests
     const cache_tests = b.addTest(.{
@@ -75,8 +75,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the cache tests
-    cache_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the cache tests
+    cache_tests.root_module.addImport("memora", memora_module);
 
     // Parallel processing tests
     const parallel_tests = b.addTest(.{
@@ -85,8 +85,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the parallel tests
-    parallel_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the parallel tests
+    parallel_tests.root_module.addImport("memora", memora_module);
 
     // Persistent index tests
     const persistent_index_tests = b.addTest(.{
@@ -95,8 +95,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the persistent index tests
-    persistent_index_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the persistent index tests
+    persistent_index_tests.root_module.addImport("memora", memora_module);
 
     // Monitoring tests
     const monitoring_tests = b.addTest(.{
@@ -105,8 +105,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Add the ContextDB module as a dependency for the monitoring tests
-    monitoring_tests.root_module.addImport("contextdb", contextdb_module);
+    // Add the Memora module as a dependency for the monitoring tests
+    monitoring_tests.root_module.addImport("memora", memora_module);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const run_hnsw_tests = b.addRunArtifact(hnsw_tests);
@@ -147,7 +147,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_raft_exe.root_module.addImport("contextdb", contextdb_module);
+    test_raft_exe.root_module.addImport("memora", memora_module);
     const test_raft_run = b.addRunArtifact(test_raft_exe);
     test_raft_step.dependOn(&test_raft_run.step);
 
@@ -158,7 +158,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_http_api_exe.root_module.addImport("contextdb", contextdb_module);
+    test_http_api_exe.root_module.addImport("memora", memora_module);
     const test_http_api_run = b.addRunArtifact(test_http_api_exe);
     test_http_api_step.dependOn(&test_http_api_run.step);
 
@@ -169,7 +169,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_fuzzing_exe.root_module.addImport("contextdb", contextdb_module);
+    test_fuzzing_exe.root_module.addImport("memora", memora_module);
     const test_fuzzing_run = b.addRunArtifact(test_fuzzing_exe);
     test_fuzzing_step.dependOn(&test_fuzzing_run.step);
 
@@ -180,7 +180,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_distributed_fuzzing_exe.root_module.addImport("contextdb", contextdb_module);
+    test_distributed_fuzzing_exe.root_module.addImport("memora", memora_module);
     const test_distributed_fuzzing_run = b.addRunArtifact(test_distributed_fuzzing_exe);
     test_distributed_fuzzing_step.dependOn(&test_distributed_fuzzing_run.step);
 
@@ -191,19 +191,19 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_mcp_exe.root_module.addImport("contextdb", contextdb_module);
+    test_mcp_exe.root_module.addImport("memora", memora_module);
     const test_mcp_run = b.addRunArtifact(test_mcp_exe);
     test_mcp_step.dependOn(&test_mcp_run.step);
 
     // Fuzzing campaign runner
-    const fuzz_runner_step = b.step("fuzz", "Run ContextDB fuzzing campaigns");
+    const fuzz_runner_step = b.step("fuzz", "Run Memora fuzzing campaigns");
     const fuzz_runner_exe = b.addExecutable(.{
         .name = "fuzz_runner",
         .root_source_file = b.path("examples/fuzz_runner.zig"),
         .target = target,
         .optimize = optimize,
     });
-    fuzz_runner_exe.root_module.addImport("contextdb", contextdb_module);
+    fuzz_runner_exe.root_module.addImport("memora", memora_module);
     const fuzz_runner_run = b.addRunArtifact(fuzz_runner_exe);
     if (b.args) |args| {
         fuzz_runner_run.addArgs(args);
@@ -218,7 +218,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    fuzz_quick_exe.root_module.addImport("contextdb", contextdb_module);
+    fuzz_quick_exe.root_module.addImport("memora", memora_module);
     const fuzz_quick_run = b.addRunArtifact(fuzz_quick_exe);
     fuzz_quick_run.addArgs(&[_][]const u8{ "--iterations", "50", "--timeout", "5", "--save-dir", "quick_fuzz" });
     fuzz_quick_step.dependOn(&fuzz_quick_run.step);
@@ -231,7 +231,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    fuzz_regression_exe.root_module.addImport("contextdb", contextdb_module);
+    fuzz_regression_exe.root_module.addImport("memora", memora_module);
     const fuzz_regression_run = b.addRunArtifact(fuzz_regression_exe);
     fuzz_regression_run.addArgs(&[_][]const u8{ "--mode", "regression", "--save-dir", "regression_results" });
     fuzz_regression_step.dependOn(&fuzz_regression_run.step);
@@ -244,7 +244,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    fuzz_distributed_exe.root_module.addImport("contextdb", contextdb_module);
+    fuzz_distributed_exe.root_module.addImport("memora", memora_module);
     const fuzz_distributed_run = b.addRunArtifact(fuzz_distributed_exe);
     fuzz_distributed_run.addArgs(&[_][]const u8{ "--mode", "distributed", "--timeout", "60" });
     fuzz_distributed_step.dependOn(&fuzz_distributed_run.step);
@@ -257,7 +257,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    fuzz_stress_exe.root_module.addImport("contextdb", contextdb_module);
+    fuzz_stress_exe.root_module.addImport("memora", memora_module);
     const fuzz_stress_run = b.addRunArtifact(fuzz_stress_exe);
     fuzz_stress_run.addArgs(&[_][]const u8{ "--mode", "stress", "--iterations", "500", "--timeout", "60" });
     fuzz_stress_step.dependOn(&fuzz_stress_run.step);
@@ -282,26 +282,26 @@ pub fn build(b: *std.Build) void {
     test_comprehensive_step.dependOn(&fuzz_quick_run.step);
 
     // Add distributed demo
-    const distributed_demo_step = b.step("demo-distributed", "Run distributed ContextDB demo");
+    const distributed_demo_step = b.step("demo-distributed", "Run distributed Memora demo");
     const distributed_demo_exe = b.addExecutable(.{
         .name = "distributed_demo",
         .root_source_file = b.path("examples/distributed_demo.zig"),
         .target = target,
         .optimize = optimize,
     });
-    distributed_demo_exe.root_module.addImport("contextdb", contextdb_module);
+    distributed_demo_exe.root_module.addImport("memora", memora_module);
     const distributed_demo_run = b.addRunArtifact(distributed_demo_exe);
     distributed_demo_step.dependOn(&distributed_demo_run.step);
 
     // Add HTTP server example
-    const http_server_step = b.step("http-server", "Run ContextDB HTTP API server");
+    const http_server_step = b.step("http-server", "Run Memora HTTP API server");
     const http_server_exe = b.addExecutable(.{
         .name = "http_server",
         .root_source_file = b.path("examples/http_server.zig"),
         .target = target,
         .optimize = optimize,
     });
-    http_server_exe.root_module.addImport("contextdb", contextdb_module);
+    http_server_exe.root_module.addImport("memora", memora_module);
     const http_server_run = b.addRunArtifact(http_server_exe);
     if (b.args) |args| {
         http_server_run.addArgs(args);
@@ -309,7 +309,7 @@ pub fn build(b: *std.Build) void {
     http_server_step.dependOn(&http_server_run.step);
 
     // Add HTTP client demo
-    const http_client_demo_step = b.step("http-client-demo", "Show ContextDB HTTP API usage examples");
+    const http_client_demo_step = b.step("http-client-demo", "Show Memora HTTP API usage examples");
     const http_client_demo_exe = b.addExecutable(.{
         .name = "http_client_demo",
         .root_source_file = b.path("examples/http_client_demo.zig"),
@@ -327,7 +327,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    mcp_server_exe.root_module.addImport("contextdb", contextdb_module);
+    mcp_server_exe.root_module.addImport("memora", memora_module);
     const mcp_server_run = b.addRunArtifact(mcp_server_exe);
     if (b.args) |args| {
         mcp_server_run.addArgs(args);

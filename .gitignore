@@ -3,15 +3,15 @@
 zig-out/
 zig-cache/
 
-# ContextDB data directories
-contextdb_data/
-my_contextdb/
+# Memora data directories
+memora_data/
+my_memora/
 test_*_data/
 demo_*/
 node*_data/
-*_contextdb/
+*_memora/
 
-# ContextDB files
+# Memora files
 *.log
 *.bin
 raftstate.bin

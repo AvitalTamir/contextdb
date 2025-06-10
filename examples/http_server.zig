@@ -1,11 +1,11 @@
 const std = @import("std");
-const contextdb = @import("contextdb");
+const memora = @import("memora");
 
-const ContextDB = contextdb.ContextDB;
-const types = contextdb.types;
-const http_api = contextdb.http_api;
+const Memora = memora.Memora;
+const types = memora.types;
+const http_api = memora.http_api;
 
-/// Standalone HTTP API server for ContextDB
+/// Standalone HTTP API server for Memora
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -16,7 +16,7 @@ pub fn main() !void {
     _ = args.skip(); // Skip program name
 
     var port: u16 = 8080;
-    var data_path = "contextdb_http_data";
+    var data_path = "memora_http_data";
 
     // Simple argument parsing
     while (args.next()) |arg| {
@@ -33,24 +33,24 @@ pub fn main() !void {
         }
     }
 
-    std.debug.print("Starting ContextDB HTTP API server...\n", .{});
+    std.debug.print("Starting Memora HTTP API server...\n", .{});
     std.debug.print("Data path: {s}\n", .{data_path});
     std.debug.print("Port: {}\n", .{port});
 
-    // Initialize ContextDB
-    const config = ContextDB.ContextDBConfig{
+    // Initialize Memora
+    const config = Memora.MemoraConfig{
         .data_path = data_path,
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = ContextDB.init(allocator, config) catch |err| {
-        std.debug.print("Failed to initialize ContextDB: {}\n", .{err});
+    var db = Memora.init(allocator, config) catch |err| {
+        std.debug.print("Failed to initialize Memora: {}\n", .{err});
         return;
     };
     defer db.deinit();
 
-    std.debug.print("ContextDB initialized successfully\n", .{});
+    std.debug.print("Memora initialized successfully\n", .{});
 
     // Pre-populate with some sample data for demo purposes
     if (try shouldPopulateSampleData(&db)) {
@@ -76,22 +76,22 @@ pub fn main() !void {
 }
 
 fn printHelp() void {
-    std.debug.print("ContextDB HTTP API Server\n\n");
+    std.debug.print("Memora HTTP API Server\n\n");
     std.debug.print("Usage: http_server [options]\n\n");
     std.debug.print("Options:\n");
     std.debug.print("  --port=PORT    Set server port (default: 8080)\n");
-    std.debug.print("  --data=PATH    Set data directory (default: contextdb_http_data)\n");
+    std.debug.print("  --data=PATH    Set data directory (default: memora_http_data)\n");
     std.debug.print("  --help         Show this help message\n\n");
     std.debug.print("Example:\n");
-    std.debug.print("  http_server --port=9090 --data=/var/lib/contextdb\n");
+    std.debug.print("  http_server --port=9090 --data=/var/lib/memora\n");
 }
 
-fn shouldPopulateSampleData(db: *ContextDB) !bool {
+fn shouldPopulateSampleData(db: *Memora) !bool {
     const stats = db.getStats();
     return stats.node_count == 0 and stats.edge_count == 0 and stats.vector_count == 0;
 }
 
-fn populateSampleData(db: *ContextDB) !void {
+fn populateSampleData(db: *Memora) !void {
     std.debug.print("Populating sample data...\n", .{});
 
     // Create sample nodes

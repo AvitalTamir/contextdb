@@ -1,9 +1,9 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
-const fuzzing = contextdb.fuzzing;
-const raft = contextdb.raft;
-const types = contextdb.types;
+const memora = @import("memora");
+const fuzzing = memora.fuzzing;
+const raft = memora.raft;
+const types = memora.types;
 
 // =============================================================================
 // Distributed Fuzzing for Raft Consensus

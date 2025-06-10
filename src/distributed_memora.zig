@@ -1,15 +1,15 @@
 const std = @import("std");
-const contextdb = @import("main.zig");
+const memora = @import("main.zig");
 const raft = @import("raft.zig");
 const raft_network = @import("raft_network.zig");
 const config = @import("config.zig");
 const testing = std.testing;
 
-/// Distributed ContextDB with Raft consensus
+/// Distributed Memora with Raft consensus
 /// Provides high availability through leader election and log replication
 /// Maintains TigerBeetle-style deterministic operation within each node
 
-/// State machine operations for ContextDB
+/// State machine operations for Memora
 pub const StateMachineOperation = packed struct {
     operation_type: OperationType,
     data_size: u32,
@@ -27,8 +27,8 @@ pub const StateMachineOperation = packed struct {
 
 /// Distributed configuration
 pub const DistributedConfig = struct {
-    // ContextDB configuration
-    contextdb_config: contextdb.ContextDBConfig,
+    // Memora configuration
+    memora_config: memora.MemoraConfig,
     
     // Raft configuration
     node_id: u64,
@@ -44,17 +44,17 @@ pub const DistributedConfig = struct {
         id: u64,
         address: []const u8,
         raft_port: u16,
-        contextdb_port: ?u16 = null, // Optional HTTP API port
+        memora_port: ?u16 = null, // Optional HTTP API port
     };
 };
 
-/// Distributed ContextDB cluster node
-pub const DistributedContextDB = struct {
+/// Distributed Memora cluster node
+pub const DistributedMemora = struct {
     allocator: std.mem.Allocator,
     config: DistributedConfig,
     
     // Core database engine
-    contextdb: contextdb.ContextDB,
+    memora: memora.Memora,
     
     // Raft consensus
     raft_node: raft_network.NetworkedRaftNode,
@@ -68,9 +68,9 @@ pub const DistributedContextDB = struct {
     operation_count: u64 = 0,
     replication_latency_ms: u64 = 0,
     
-    pub fn init(allocator: std.mem.Allocator, distributed_config: DistributedConfig) !DistributedContextDB {
-        // Initialize ContextDB engine
-        const contextdb_engine = try contextdb.ContextDB.init(allocator, distributed_config.contextdb_config);
+    pub fn init(allocator: std.mem.Allocator, distributed_config: DistributedConfig) !DistributedMemora {
+        // Initialize Memora engine
+        const memora_engine = try memora.Memora.init(allocator, distributed_config.memora_config);
         
         // Create Raft cluster configuration
         const cluster_config = try createRaftClusterConfig(allocator, distributed_config.cluster_nodes);
@@ -80,25 +80,25 @@ pub const DistributedContextDB = struct {
             allocator,
             distributed_config.node_id,
             cluster_config,
-            distributed_config.contextdb_config.data_path,
+            distributed_config.memora_config.data_path,
             distributed_config.raft_port
         );
         
-        return DistributedContextDB{
+        return DistributedMemora{
             .allocator = allocator,
             .config = distributed_config,
-            .contextdb = contextdb_engine,
+            .memora = memora_engine,
             .raft_node = raft_node,
         };
     }
     
-    pub fn deinit(self: *DistributedContextDB) void {
+    pub fn deinit(self: *DistributedMemora) void {
         self.raft_node.deinit();
-        self.contextdb.deinit();
+        self.memora.deinit();
     }
     
-    pub fn start(self: *DistributedContextDB) !void {
-        std.debug.print("Starting DistributedContextDB node {}\n", .{self.config.node_id});
+    pub fn start(self: *DistributedMemora) !void {
+        std.debug.print("Starting DistributedMemora node {}\n", .{self.config.node_id});
         
         // Start Raft consensus in background
         const raft_thread = try std.Thread.spawn(.{}, startRaftNode, .{&self.raft_node});
@@ -112,22 +112,22 @@ pub const DistributedContextDB = struct {
     }
     
     /// Insert a node (distributed operation)
-    pub fn insertNode(self: *DistributedContextDB, node: contextdb.types.Node) !void {
+    pub fn insertNode(self: *DistributedMemora, node: memora.types.Node) !void {
         const operation = StateMachineOperation{
             .operation_type = .insert_node,
-            .data_size = @sizeOf(contextdb.types.Node),
+            .data_size = @sizeOf(memora.types.Node),
             .checksum = calculateChecksum(std.mem.asBytes(&node)),
         };
         
         // Serialize operation
-        var operation_data = try self.allocator.alloc(u8, @sizeOf(StateMachineOperation) + @sizeOf(contextdb.types.Node));
+        var operation_data = try self.allocator.alloc(u8, @sizeOf(StateMachineOperation) + @sizeOf(memora.types.Node));
         defer self.allocator.free(operation_data);
         
         @memcpy(operation_data[0..@sizeOf(StateMachineOperation)], std.mem.asBytes(&operation));
         @memcpy(operation_data[@sizeOf(StateMachineOperation)..], std.mem.asBytes(&node));
         
         // Submit to Raft for replication
-        const log_index = try self.raft_node.submitEntry(.contextdb_operation, operation_data);
+        const log_index = try self.raft_node.submitEntry(.memora_operation, operation_data);
         
         // Wait for commit (simplified - should use proper async mechanisms)
         try self.waitForCommit(log_index);
@@ -136,51 +136,51 @@ pub const DistributedContextDB = struct {
     }
     
     /// Insert an edge (distributed operation)
-    pub fn insertEdge(self: *DistributedContextDB, edge: contextdb.types.Edge) !void {
+    pub fn insertEdge(self: *DistributedMemora, edge: memora.types.Edge) !void {
         const operation = StateMachineOperation{
             .operation_type = .insert_edge,
-            .data_size = @sizeOf(contextdb.types.Edge),
+            .data_size = @sizeOf(memora.types.Edge),
             .checksum = calculateChecksum(std.mem.asBytes(&edge)),
         };
         
-        var operation_data = try self.allocator.alloc(u8, @sizeOf(StateMachineOperation) + @sizeOf(contextdb.types.Edge));
+        var operation_data = try self.allocator.alloc(u8, @sizeOf(StateMachineOperation) + @sizeOf(memora.types.Edge));
         defer self.allocator.free(operation_data);
         
         @memcpy(operation_data[0..@sizeOf(StateMachineOperation)], std.mem.asBytes(&operation));
         @memcpy(operation_data[@sizeOf(StateMachineOperation)..], std.mem.asBytes(&edge));
         
-        const log_index = try self.raft_node.submitEntry(.contextdb_operation, operation_data);
+        const log_index = try self.raft_node.submitEntry(.memora_operation, operation_data);
         try self.waitForCommit(log_index);
         
         self.operation_count += 1;
     }
     
     /// Insert a vector (distributed operation)
-    pub fn insertVector(self: *DistributedContextDB, vector: contextdb.types.Vector) !void {
+    pub fn insertVector(self: *DistributedMemora, vector: memora.types.Vector) !void {
         const operation = StateMachineOperation{
             .operation_type = .insert_vector,
-            .data_size = @sizeOf(contextdb.types.Vector),
+            .data_size = @sizeOf(memora.types.Vector),
             .checksum = calculateChecksum(std.mem.asBytes(&vector)),
         };
         
-        var operation_data = try self.allocator.alloc(u8, @sizeOf(StateMachineOperation) + @sizeOf(contextdb.types.Vector));
+        var operation_data = try self.allocator.alloc(u8, @sizeOf(StateMachineOperation) + @sizeOf(memora.types.Vector));
         defer self.allocator.free(operation_data);
         
         @memcpy(operation_data[0..@sizeOf(StateMachineOperation)], std.mem.asBytes(&operation));
         @memcpy(operation_data[@sizeOf(StateMachineOperation)..], std.mem.asBytes(&vector));
         
-        const log_index = try self.raft_node.submitEntry(.contextdb_operation, operation_data);
+        const log_index = try self.raft_node.submitEntry(.memora_operation, operation_data);
         try self.waitForCommit(log_index);
         
         self.operation_count += 1;
     }
     
     /// Batch insert (distributed operation)
-    pub fn insertBatch(self: *DistributedContextDB, nodes: []const contextdb.types.Node, edges: []const contextdb.types.Edge, vectors: []const contextdb.types.Vector) !void {
+    pub fn insertBatch(self: *DistributedMemora, nodes: []const memora.types.Node, edges: []const memora.types.Edge, vectors: []const memora.types.Vector) !void {
         // Serialize batch data
-        const nodes_size = nodes.len * @sizeOf(contextdb.types.Node);
-        const edges_size = edges.len * @sizeOf(contextdb.types.Edge);
-        const vectors_size = vectors.len * @sizeOf(contextdb.types.Vector);
+        const nodes_size = nodes.len * @sizeOf(memora.types.Node);
+        const edges_size = edges.len * @sizeOf(memora.types.Edge);
+        const vectors_size = vectors.len * @sizeOf(memora.types.Vector);
         const total_data_size = nodes_size + edges_size + vectors_size + (3 * @sizeOf(u32)); // Include counts
         
         const operation = StateMachineOperation{
@@ -232,32 +232,32 @@ pub const DistributedContextDB = struct {
         };
         @memcpy(operation_data[0..@sizeOf(StateMachineOperation)], std.mem.asBytes(&updated_operation));
         
-        const log_index = try self.raft_node.submitEntry(.contextdb_operation, operation_data);
+        const log_index = try self.raft_node.submitEntry(.memora_operation, operation_data);
         try self.waitForCommit(log_index);
         
         self.operation_count += 1;
     }
     
     /// Query operations (read-only, can be performed on any node with proper quorum)
-    pub fn querySimilar(self: *DistributedContextDB, vector_id: u64, top_k: u32) !std.ArrayList(contextdb.types.SimilarityResult) {
+    pub fn querySimilar(self: *DistributedMemora, vector_id: u64, top_k: u32) !std.ArrayList(memora.types.SimilarityResult) {
         // For read operations, ensure we're up-to-date or have read quorum
         if (!self.isReadQuorumAvailable()) {
             return error.InsufficientQuorum;
         }
         
-        return self.contextdb.querySimilar(vector_id, top_k);
+        return self.memora.querySimilar(vector_id, top_k);
     }
     
-    pub fn queryRelated(self: *DistributedContextDB, start_node_id: u64, depth: u8) !std.ArrayList(contextdb.types.Node) {
+    pub fn queryRelated(self: *DistributedMemora, start_node_id: u64, depth: u8) !std.ArrayList(memora.types.Node) {
         if (!self.isReadQuorumAvailable()) {
             return error.InsufficientQuorum;
         }
         
-        return self.contextdb.queryRelated(start_node_id, depth);
+        return self.memora.queryRelated(start_node_id, depth);
     }
     
     /// Get cluster status
-    pub fn getClusterStatus(self: *DistributedContextDB) ClusterStatus {
+    pub fn getClusterStatus(self: *DistributedMemora) ClusterStatus {
         return ClusterStatus{
             .node_id = self.config.node_id,
             .is_leader = self.is_leader,
@@ -270,7 +270,7 @@ pub const DistributedContextDB = struct {
     
     // Private methods
     
-    fn tick(self: *DistributedContextDB) !void {
+    fn tick(self: *DistributedMemora) !void {
         // Check for newly committed entries to apply
         try self.applyCommittedEntries();
         
@@ -279,20 +279,20 @@ pub const DistributedContextDB = struct {
         
         // Persist state periodically
         if (self.operation_count % 100 == 0) {
-            try self.contextdb.savePersistentIndexes();
+            try self.memora.savePersistentIndexes();
         }
     }
     
-    fn applyCommittedEntries(self: *DistributedContextDB) !void {
+    fn applyCommittedEntries(self: *DistributedMemora) !void {
         // Apply any new committed log entries to the state machine
-        // This is where we execute the ContextDB operations
+        // This is where we execute the Memora operations
         
         // TODO: Implement proper log entry application
         // For now, this is a placeholder
         _ = self; // Suppress unused parameter warning
     }
     
-    fn updateLeaderStatus(self: *DistributedContextDB) void {
+    fn updateLeaderStatus(self: *DistributedMemora) void {
         // Update leadership status based on Raft state
         const raft_state = self.raft_node.raft_node.state;
         const was_leader = self.is_leader;
@@ -306,7 +306,7 @@ pub const DistributedContextDB = struct {
         }
     }
     
-    fn waitForCommit(self: *DistributedContextDB, log_index: u64) !void {
+    fn waitForCommit(self: *DistributedMemora, log_index: u64) !void {
         // Simplified wait for commit - in production, use proper async mechanisms
         const timeout_ms = 5000; // 5 second timeout
         const start_time = std.time.milliTimestamp();
@@ -319,7 +319,7 @@ pub const DistributedContextDB = struct {
         }
     }
     
-    fn isReadQuorumAvailable(self: *DistributedContextDB) bool {
+    fn isReadQuorumAvailable(self: *DistributedMemora) bool {
         // Simplified quorum check - in production, check actual node availability
         return self.is_leader or self.leader_id != null;
     }
@@ -366,7 +366,7 @@ fn calculateChecksum(data: []const u8) u32 {
     return Crc32.hash(data);
 }
 
-/// Distributed ContextDB demo
+/// Distributed Memora demo
 pub fn demo() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -383,7 +383,7 @@ pub fn demo() !void {
     };
     
     const distributed_config = DistributedConfig{
-        .contextdb_config = contextdb.ContextDBConfig{
+        .memora_config = memora.MemoraConfig{
             .data_path = "distributed_demo/node1",
             .enable_persistent_indexes = true,
         },
@@ -393,11 +393,11 @@ pub fn demo() !void {
     };
     
     // Initialize distributed database
-    var distributed_db = try DistributedContextDB.init(allocator, distributed_config);
+    var distributed_db = try DistributedMemora.init(allocator, distributed_config);
     defer distributed_db.deinit();
     defer std.fs.cwd().deleteTree("distributed_demo") catch {};
     
-    std.debug.print("DistributedContextDB Demo Started\n", .{});
+    std.debug.print("DistributedMemora Demo Started\n", .{});
     std.debug.print("Node ID: {}\n", .{distributed_config.node_id});
     std.debug.print("Cluster size: {}\n", .{cluster_nodes.len});
     
@@ -409,7 +409,7 @@ pub fn demo() !void {
     std.debug.print("  Is Leader: {}\n", .{status.is_leader});
     std.debug.print("  Operations: {}\n", .{status.operation_count});
     
-    std.debug.print("DistributedContextDB Demo Setup Complete!\n", .{});
+    std.debug.print("DistributedMemora Demo Setup Complete!\n", .{});
     std.debug.print("To run a full cluster, start multiple processes with different node IDs\n", .{});
 }
 
@@ -510,7 +510,7 @@ test "Cluster configuration integration test" {
     std.debug.print("✓ Cluster configuration integration test passed\n", .{});
 }
 
-test "Distributed ContextDB configuration" {
+test "Distributed Memora configuration" {
     const cluster_nodes = [_]DistributedConfig.ClusterNode{
         .{ .id = 1, .address = "127.0.0.1", .raft_port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .raft_port = 8002 },
@@ -518,7 +518,7 @@ test "Distributed ContextDB configuration" {
     };
     
     const distributed_config = DistributedConfig{
-        .contextdb_config = .{
+        .memora_config = .{
             .data_path = "test_distributed_config",
             .enable_persistent_indexes = true,
         },

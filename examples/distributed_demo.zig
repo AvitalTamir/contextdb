@@ -1,7 +1,7 @@
 const std = @import("std");
-const contextdb = @import("contextdb");
+const memora = @import("memora");
 
-/// Distributed ContextDB Demo
+/// Distributed Memora Demo
 /// Shows how to set up and use a distributed cluster with Raft consensus
 
 pub fn main() !void {
@@ -9,7 +9,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("=== DistributedContextDB Demo ===\n\n", .{});
+    std.debug.print("=== DistributedMemora Demo ===\n\n", .{});
 
     // Clean up any existing demo data
     cleanupDemoData();
@@ -36,16 +36,16 @@ pub fn main() !void {
 }
 
 fn demoSingleNodeSetup(allocator: std.mem.Allocator) !void {
-    std.debug.print("Demo 1: Single Node Distributed ContextDB Setup\n", .{});
+    std.debug.print("Demo 1: Single Node Distributed Memora Setup\n", .{});
     std.debug.print("----------------------------------------------\n", .{});
 
     // Create single node "cluster"
-    const cluster_nodes = [_]contextdb.distributed_contextdb.DistributedConfig.ClusterNode{
+    const cluster_nodes = [_]memora.distributed_memora.DistributedConfig.ClusterNode{
         .{ .id = 1, .address = "127.0.0.1", .raft_port = 8001 },
     };
 
-    const config = contextdb.distributed_contextdb.DistributedConfig{
-        .contextdb_config = contextdb.ContextDBConfig{
+    const config = memora.distributed_memora.DistributedConfig{
+        .memora_config = memora.MemoraConfig{
             .data_path = "demo_single_node",
             .enable_persistent_indexes = true,
         },
@@ -58,7 +58,7 @@ fn demoSingleNodeSetup(allocator: std.mem.Allocator) !void {
     };
 
     // Initialize single-node distributed database
-    var distributed_db = try contextdb.distributed_contextdb.DistributedContextDB.init(allocator, config);
+    var distributed_db = try memora.distributed_memora.DistributedMemora.init(allocator, config);
     defer distributed_db.deinit();
 
     // Show cluster status
@@ -75,15 +75,15 @@ fn demoClusterConfiguration() !void {
     std.debug.print("---------------------------------------\n", .{});
 
     // Create 3-node cluster configuration
-    const cluster_nodes = [_]contextdb.distributed_contextdb.DistributedConfig.ClusterNode{
-        .{ .id = 1, .address = "127.0.0.1", .raft_port = 8001, .contextdb_port = 9001 },
-        .{ .id = 2, .address = "127.0.0.1", .raft_port = 8002, .contextdb_port = 9002 },
-        .{ .id = 3, .address = "127.0.0.1", .raft_port = 8003, .contextdb_port = 9003 },
+    const cluster_nodes = [_]memora.distributed_memora.DistributedConfig.ClusterNode{
+        .{ .id = 1, .address = "127.0.0.1", .raft_port = 8001, .memora_port = 9001 },
+        .{ .id = 2, .address = "127.0.0.1", .raft_port = 8002, .memora_port = 9002 },
+        .{ .id = 3, .address = "127.0.0.1", .raft_port = 8003, .memora_port = 9003 },
     };
 
     // Configuration for node 1
-    const config = contextdb.distributed_contextdb.DistributedConfig{
-        .contextdb_config = contextdb.ContextDBConfig{
+    const config = memora.distributed_memora.DistributedConfig{
+        .memora_config = memora.MemoraConfig{
             .data_path = "demo_cluster_node1",
             .enable_persistent_indexes = true,
         },
@@ -97,11 +97,11 @@ fn demoClusterConfiguration() !void {
 
     std.debug.print("  Cluster Configuration:\n", .{});
     for (cluster_nodes, 0..) |node, i| {
-        std.debug.print("    Node {}: {s}:{} (ContextDB: {})\n", .{
+        std.debug.print("    Node {}: {s}:{} (Memora: {})\n", .{
             node.id,
             node.address,
             node.raft_port,
-            node.contextdb_port orelse 0,
+            node.memora_port orelse 0,
         });
         if (i == 0) std.debug.print("      ^ This node (current process)\n", .{});
     }
@@ -119,7 +119,7 @@ fn demoDistributedOperations() !void {
     std.debug.print("Demo 3: Distributed Operations API\n", .{});
     std.debug.print("---------------------------------\n", .{});
 
-    std.debug.print("  Distributed ContextDB Operations:\n", .{});
+    std.debug.print("  Distributed Memora Operations:\n", .{});
     std.debug.print("  \n", .{});
     std.debug.print("  // Write operations (require consensus)\n", .{});
     std.debug.print("  await distributedDB.insertNode(node);     // Replicated to all nodes\n", .{});
@@ -155,13 +155,13 @@ fn demoRaftProtocol() !void {
     std.debug.print("--------------------------------------\n", .{});
 
     // Create a Raft cluster configuration
-    const cluster_nodes = [_]contextdb.raft.ClusterConfig.NodeInfo{
+    const cluster_nodes = [_]memora.raft.ClusterConfig.NodeInfo{
         .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
         .{ .id = 3, .address = "127.0.0.1", .port = 8003 },
     };
 
-    const cluster_config = contextdb.raft.ClusterConfig{
+    const cluster_config = memora.raft.ClusterConfig{
         .nodes = &cluster_nodes,
     };
 
@@ -191,7 +191,7 @@ fn demoRaftProtocol() !void {
     // Show message types
     std.debug.print("  \n", .{});
     std.debug.print("  Raft Message Types:\n", .{});
-    const message_types = [_]contextdb.raft.MessageType{
+    const message_types = [_]memora.raft.MessageType{
         .request_vote,
         .request_vote_reply,
         .append_entries,

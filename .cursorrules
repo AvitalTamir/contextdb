@@ -11,7 +11,7 @@
 - **Sequential I/O**: Optimize for disk/SSD sequential access patterns
 - **Memory-Mapped I/O**: Let the OS handle caching and persistence efficiently
 
-### ContextDB Architecture Principles
+### Memora Architecture Principles
 - **Hybrid Design**: Seamlessly combine graph traversal and vector similarity search
 - **Distributed Consensus**: Use Raft protocol for strong consistency across nodes
 - **Iceberg-Style Storage**: Immutable snapshots with metadata for time-travel queries
@@ -258,10 +258,10 @@ pub fn functionName(param1: Type1, param2: Type2) !ReturnType {
 - Configuration management
 - Deployment automation
 
-## 🎯 Specific ContextDB Guidelines
+## 🎯 Specific Memora Guidelines
 
 ### Vector Operations
-- Always validate vector dimensions (128 for ContextDB)
+- Always validate vector dimensions (128 for Memora)
 - Use SIMD instructions where available
 - Implement efficient distance metrics (cosine similarity)
 - Batch vector operations for better cache utilization
@@ -284,4 +284,4 @@ pub fn functionName(param1: Type1, param2: Type2) !ReturnType {
 - Use efficient JSON parsing and generation
 - Include comprehensive error responses
 
-Remember: **Performance, Reliability, and Simplicity** are the three pillars of ContextDB. Every decision should be evaluated against these criteria. 
+Remember: **Performance, Reliability, and Simplicity** are the three pillars of Memora. Every decision should be evaluated against these criteria. 

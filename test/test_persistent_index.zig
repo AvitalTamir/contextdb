@@ -1,8 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
-const types = contextdb.types;
-const persistent_index = contextdb.persistent_index;
+const memora = @import("memora");
+const types = memora.types;
+const persistent_index = memora.persistent_index;
 
 // Comprehensive Persistent Index Tests
 // Following TigerBeetle-style programming: deterministic, extensive, zero external dependencies
@@ -285,7 +285,7 @@ test "IndexUtils graph and vector conversion" {
     const allocator = testing.allocator;
     
     // Create a mock graph index
-    var graph_index = contextdb.graph.GraphIndex.init(allocator);
+    var graph_index = memora.graph.GraphIndex.init(allocator);
     defer graph_index.deinit();
     
     // Add test data
@@ -302,7 +302,7 @@ test "IndexUtils graph and vector conversion" {
     try testing.expect(graph_data.edges.items.len == 1);
     
     // Create a mock vector index
-    var vector_index = contextdb.vector.VectorIndex.init(allocator);
+    var vector_index = memora.vector.VectorIndex.init(allocator);
     defer vector_index.deinit();
     
     const dims = [_]f32{ 1.0, 0.0, 0.0 } ++ [_]f32{0.0} ** 125;

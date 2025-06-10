@@ -2,7 +2,7 @@ const std = @import("std");
 const main = @import("main.zig");
 const types = @import("types.zig");
 
-const ContextDB = main.ContextDB;
+const Memora = main.Memora;
 
 /// JSON-RPC 2.0 error codes
 pub const JsonRpcError = struct {
@@ -118,14 +118,14 @@ pub const McpPromptArgument = struct {
 /// MCP Server implementation
 pub const McpServer = struct {
     allocator: std.mem.Allocator,
-    db: *ContextDB,
+    db: *Memora,
     port: u16,
     server_info: McpImplementation,
     capabilities: McpCapabilities,
     
     const Self = @This();
     
-    pub fn init(allocator: std.mem.Allocator, db: *ContextDB, port: u16) Self {
+    pub fn init(allocator: std.mem.Allocator, db: *Memora, port: u16) Self {
         return Self{
             .allocator = allocator,
             .db = db,

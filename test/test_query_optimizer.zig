@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
-const query_optimizer = contextdb.query_optimizer;
+const memora = @import("memora");
+const query_optimizer = memora.query_optimizer;
 
 // Comprehensive Query Optimizer Tests
 // Following TigerBeetle-style programming: deterministic, extensive, zero external dependencies

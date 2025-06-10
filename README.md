@@ -141,7 +141,7 @@ zig build mcp-server
 
 ```zig
 const std = @import("std");
-const ContextDB = @import("src/main.zig").ContextDB;
+const Memora = @import("src/main.zig").Memora;
 const types = @import("src/types.zig");
 
 pub fn main() !void {
@@ -149,12 +149,12 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const config = ContextDB.ContextDBConfig{
+    const config = Memora.MemoraConfig{
         .data_path = "memora_data",
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config);
+    var db = try Memora.init(allocator, config);
     defer db.deinit();
 
     // Store knowledge as nodes, edges, vectors

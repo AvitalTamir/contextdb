@@ -1,6 +1,6 @@
-# ContextDB Configuration Guide
+# Memora Configuration Guide
 
-This guide covers all configuration options available in ContextDB. The configuration system uses a simple `key=value` format and supports unit suffixes, comments, and environment-specific setups.
+This guide covers all configuration options available in Memora. The configuration system uses a simple `key=value` format and supports unit suffixes, comments, and environment-specific setups.
 
 ## 📋 Table of Contents
 
@@ -27,20 +27,20 @@ This guide covers all configuration options available in ContextDB. The configur
 
 ```bash
 # Copy the example configuration
-cp contextdb.conf.example contextdb.conf
+cp memora.conf.example memora.conf
 
 # Edit for your needs
-nano contextdb.conf
+nano memora.conf
 
-# Start ContextDB
+# Start Memora
 zig build run
 ```
 
 ### Configuration File Location
 
-ContextDB looks for configuration files in this order:
-1. `./contextdb.conf` (current directory)
-2. `./contextdb.conf.example` (fallback to example)
+Memora looks for configuration files in this order:
+1. `./memora.conf` (current directory)
+2. `./memora.conf.example` (fallback to example)
 3. Built-in defaults
 
 ## Configuration Format
@@ -81,7 +81,7 @@ Controls fundamental database behavior and storage.
 
 ### Log Configuration
 
-The append-only log is the foundation of ContextDB's durability guarantees.
+The append-only log is the foundation of Memora's durability guarantees.
 
 ```ini
 # Initial size of the append-only log file
@@ -98,7 +98,7 @@ log_max_size = 1GB
 
 ## Caching System
 
-ContextDB includes a sophisticated multi-level caching system with LRU and LFU eviction policies.
+Memora includes a sophisticated multi-level caching system with LRU and LFU eviction policies.
 
 ### Cache Settings
 
@@ -131,7 +131,7 @@ cache_load_factor_threshold = 0.6
 
 ## HTTP API Configuration
 
-Settings for the REST API server that provides language-agnostic access to ContextDB.
+Settings for the REST API server that provides language-agnostic access to Memora.
 
 ### Server Settings
 
@@ -418,7 +418,7 @@ persistent_index_checksum_validation = false
 
 ## Compression System
 
-ContextDB includes a sophisticated high-performance compression system optimized for vector data, persistent indexes, and snapshot storage. The compression engine provides significant space savings with minimal performance impact.
+Memora includes a sophisticated high-performance compression system optimized for vector data, persistent indexes, and snapshot storage. The compression engine provides significant space savings with minimal performance impact.
 
 ### Vector Compression Settings
 
@@ -574,8 +574,8 @@ s3_bucket = ""
 # AWS region for S3 operations
 s3_region = us-east-1
 
-# S3 prefix for all ContextDB files
-s3_prefix = contextdb/
+# S3 prefix for all Memora files
+s3_prefix = memora/
 ```
 
 ### S3 Performance
@@ -609,7 +609,7 @@ s3_verify_uploads = true
 **Production S3 Setup:**
 ```ini
 s3_enable = true
-s3_bucket = my-production-contextdb
+s3_bucket = my-production-memora
 s3_region = us-west-2
 s3_prefix = production/
 s3_upload_timeout_ms = 600000
@@ -620,7 +620,7 @@ s3_cleanup_auto_enable = true
 **Development S3 Setup:**
 ```ini
 s3_enable = true
-s3_bucket = my-dev-contextdb
+s3_bucket = my-dev-memora
 s3_region = us-east-1
 s3_prefix = development/
 s3_upload_timeout_ms = 180000
@@ -774,7 +774,7 @@ cluster_bootstrap_expect = 7
 Optimized for fast iteration and debugging:
 
 ```ini
-# Development ContextDB Configuration
+# Development Memora Configuration
 log_initial_size = 1MB
 log_max_size = 100MB
 
@@ -809,7 +809,7 @@ raft_enable = false
 Optimized for performance, reliability, and observability:
 
 ```ini
-# Production ContextDB Configuration
+# Production Memora Configuration
 log_initial_size = 100MB
 log_max_size = 10GB
 
@@ -844,7 +844,7 @@ snapshot_auto_interval = 5000
 snapshot_cleanup_keep_count = 50
 snapshot_compression_enable = true
 s3_enable = true
-s3_bucket = production-contextdb
+s3_bucket = production-memora
 s3_region = us-west-2
 
 raft_enable = true
@@ -858,7 +858,7 @@ cluster_write_quorum = 2
 Optimized for maximum throughput and minimal latency:
 
 ```ini
-# High-Performance ContextDB Configuration
+# High-Performance Memora Configuration
 log_initial_size = 1GB
 log_max_size = 100GB
 
@@ -1006,12 +1006,12 @@ snapshot_compression_enable = false
 
 ## 🔧 Configuration Validation
 
-ContextDB automatically validates configuration values and provides helpful error messages for invalid settings. Unknown configuration keys are ignored for forward compatibility.
+Memora automatically validates configuration values and provides helpful error messages for invalid settings. Unknown configuration keys are ignored for forward compatibility.
 
 ## 📚 Additional Resources
 
 - [README.md](README.md) - Main documentation and getting started guide
-- [contextdb.conf.example](contextdb.conf.example) - Complete example configuration with comments
+- [memora.conf.example](memora.conf.example) - Complete example configuration with comments
 - Performance benchmarks and tuning guides (coming soon)
 - Deployment guides for cloud platforms (coming soon)
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const config = @import("config.zig");
 
-/// Append-only binary log for ContextDB
+/// Append-only binary log for Memora
 /// Follows TigerBeetle design principles: single-threaded, deterministic, no locks
 pub const AppendLog = struct {
     allocator: std.mem.Allocator,
@@ -19,7 +19,7 @@ pub const AppendLog = struct {
     pub fn init(allocator: std.mem.Allocator, log_path: []const u8, log_config: ?config.Config) !AppendLog {
         // Use provided config or load from default location
         const cfg = log_config orelse blk: {
-            const config_path = "contextdb.conf";
+            const config_path = "memora.conf";
             // Create default config if it doesn't exist
             try config.Config.createDefaultIfMissing(config_path);
             break :blk try config.Config.fromFile(allocator, config_path);
@@ -417,9 +417,9 @@ test "AppendLog default configuration fallback" {
     
     // Clean up any previous test file and config
     std.fs.cwd().deleteFile(log_path) catch {};
-    std.fs.cwd().deleteFile("contextdb.conf") catch {};
+    std.fs.cwd().deleteFile("memora.conf") catch {};
     defer std.fs.cwd().deleteFile(log_path) catch {};
-    defer std.fs.cwd().deleteFile("contextdb.conf") catch {};
+    defer std.fs.cwd().deleteFile("memora.conf") catch {};
     
     // Initialize without explicit config (should use defaults)
     var log = try AppendLog.init(allocator, log_path, null);

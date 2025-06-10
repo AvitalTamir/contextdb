@@ -1,11 +1,11 @@
-# ContextDB Makefile
+# Memora Makefile
 # Convenient targets for development and testing
 
 .PHONY: help build test test-all test-raft clean run demo demo-distributed format check setup install deps
 
 # Default target
 help:
-	@echo "ContextDB - Distributed Hybrid Vector and Graph Database"
+	@echo "Memora - Distributed Hybrid Vector and Graph Database"
 	@echo ""
 	@echo "Available targets:"
 	@echo "  build              - Build the project"
@@ -19,7 +19,7 @@ help:
 	@echo "  format             - Format all Zig source files"
 	@echo "  check              - Check code without building"
 	@echo "  setup              - Setup development environment"
-	@echo "  install            - Install ContextDB binary (requires sudo)"
+	@echo "  install            - Install Memora binary (requires sudo)"
 	@echo "  benchmark          - Run performance benchmarks"
 	@echo "  docs               - Generate documentation"
 	@echo ""
@@ -105,9 +105,9 @@ dev-setup:
 	@aws --version 2>/dev/null || echo "⚠️  AWS CLI not found (optional for S3 features)"
 
 install: release
-	@echo "Installing ContextDB..."
-	sudo cp zig-out/bin/contextdb /usr/local/bin/
-	@echo "✓ ContextDB installed to /usr/local/bin/contextdb"
+	@echo "Installing Memora..."
+	sudo cp zig-out/bin/memora /usr/local/bin/
+	@echo "✓ Memora installed to /usr/local/bin/memora"
 
 # Cleanup targets
 clean:
@@ -115,7 +115,7 @@ clean:
 	rm -rf .zig-cache/
 	rm -rf zig-out/
 	@echo "Cleaning test data..."
-	rm -rf test_*/ demo_*/ *_contextdb/ node*_data/
+	rm -rf test_*/ demo_*/ *_memora/ node*_data/
 	rm -f *.log *.bin raft_state.bin
 	@echo "✓ Cleanup complete"
 
@@ -132,7 +132,7 @@ git-setup:
 
 # Distributed cluster helpers
 cluster-start:
-	@echo "Starting 3-node ContextDB cluster..."
+	@echo "Starting 3-node Memora cluster..."
 	@echo "Node 1: http://localhost:9001 (Raft: 8001)"
 	@echo "Node 2: http://localhost:9002 (Raft: 8002)" 
 	@echo "Node 3: http://localhost:9003 (Raft: 8003)"
@@ -156,13 +156,13 @@ docker-build:
 
 # Monitoring and debugging
 logs:
-	@echo "Showing recent ContextDB logs..."
+	@echo "Showing recent Memora logs..."
 	@find . -name "*.log" -exec tail -f {} \; 2>/dev/null || echo "No log files found"
 
 status:
-	@echo "ContextDB Status:"
+	@echo "Memora Status:"
 	@echo "Build artifacts: $(shell test -d .zig-cache && echo '✓ Present' || echo '❌ None')"
-	@echo "Test data: $(shell find . -maxdepth 1 -name '*_contextdb' -o -name 'demo_*' -o -name 'test_*' | wc -l | tr -d ' ') directories"
+	@echo "Test data: $(shell find . -maxdepth 1 -name '*_memora' -o -name 'demo_*' -o -name 'test_*' | wc -l | tr -d ' ') directories"
 	@echo "Zig version: $(shell zig version 2>/dev/null || echo 'Not found')"
 
 # Quick aliases for common tasks

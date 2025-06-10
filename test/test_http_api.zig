@@ -1,11 +1,11 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
+const memora = @import("memora");
 
-const ContextDB = contextdb.ContextDB;
-const ContextDBConfig = contextdb.ContextDBConfig;
-const types = contextdb.types;
-const http_api = contextdb.http_api;
+const Memora = memora.Memora;
+const MemoraConfig = memora.MemoraConfig;
+const types = memora.types;
+const http_api = memora.http_api;
 
 test "HTTP API basic functionality" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -17,12 +17,12 @@ test "HTTP API basic functionality" {
     defer std.fs.cwd().deleteTree("test_http_api_data") catch {};
 
     // Initialize database
-    const config = ContextDBConfig{
+    const config = MemoraConfig{
         .data_path = "test_http_api_data",
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, config, null);
+    var db = try Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Test ApiServer initialization
@@ -164,16 +164,16 @@ test "HTTP API configuration integration" {
     defer std.fs.cwd().deleteTree("test_http_config_data") catch {};
 
     // Initialize database
-    const db_config = ContextDBConfig{
+    const db_config = MemoraConfig{
         .data_path = "test_http_config_data",
         .enable_persistent_indexes = true,
     };
 
-    var db = try ContextDB.init(allocator, db_config, null);
+    var db = try Memora.init(allocator, db_config, null);
     defer db.deinit();
 
     // Create custom HTTP configuration
-    const http_config_data = contextdb.config_mod.Config{
+    const http_config_data = memora.config_mod.Config{
         .http_port = 9090,
         .http_request_buffer_size = 2048,
         .http_response_buffer_size = 4096,

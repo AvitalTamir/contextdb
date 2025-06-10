@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
+const memora = @import("memora");
 
 // Comprehensive Raft Consensus Tests
 // Following TigerBeetle-style testing: deterministic, extensive, zero external dependencies
@@ -13,7 +13,7 @@ test "Raft persistent state save and load" {
     defer std.fs.cwd().deleteFile("test_raft_state.bin") catch {};
     
     // Test state
-    const original_state = contextdb.raft.PersistentState{
+    const original_state = memora.raft.PersistentState{
         .current_term = 42,
         .voted_for = 123,
         .log_start_index = 10,
@@ -23,7 +23,7 @@ test "Raft persistent state save and load" {
     try original_state.save(allocator, "test_raft_state.bin");
     
     // Load state back
-    const loaded_state = try contextdb.raft.PersistentState.load(allocator, "test_raft_state.bin");
+    const loaded_state = try memora.raft.PersistentState.load(allocator, "test_raft_state.bin");
     
     // Verify state integrity
     try testing.expect(loaded_state.current_term == original_state.current_term);
@@ -35,7 +35,7 @@ test "Raft persistent state default values" {
     const allocator = testing.allocator;
     
     // Load non-existent file should return defaults
-    const default_state = try contextdb.raft.PersistentState.load(allocator, "non_existent_file.bin");
+    const default_state = try memora.raft.PersistentState.load(allocator, "non_existent_file.bin");
     
     try testing.expect(default_state.current_term == 0);
     try testing.expect(default_state.voted_for == null);
@@ -43,13 +43,13 @@ test "Raft persistent state default values" {
 }
 
 test "Raft cluster configuration" {
-    const node_infos = [_]contextdb.raft.ClusterConfig.NodeInfo{
+    const node_infos = [_]memora.raft.ClusterConfig.NodeInfo{
         .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
         .{ .id = 3, .address = "127.0.0.1", .port = 8003 },
     };
     
-    const config = contextdb.raft.ClusterConfig{
+    const config = memora.raft.ClusterConfig{
         .nodes = &node_infos,
     };
     
@@ -72,14 +72,14 @@ test "Raft node initialization" {
     
     try std.fs.cwd().makeDir("test_raft_node");
     
-    const node_infos = [_]contextdb.raft.ClusterConfig.NodeInfo{
+    const node_infos = [_]memora.raft.ClusterConfig.NodeInfo{
         .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
     };
     
-    const cluster_config = contextdb.raft.ClusterConfig{ .nodes = &node_infos };
+    const cluster_config = memora.raft.ClusterConfig{ .nodes = &node_infos };
     
-    var raft_node = try contextdb.raft.RaftNode.init(allocator, 1, cluster_config, "test_raft_node", null);
+    var raft_node = try memora.raft.RaftNode.init(allocator, 1, cluster_config, "test_raft_node", null);
     defer raft_node.deinit();
     
     // Test initial state
@@ -91,25 +91,25 @@ test "Raft node initialization" {
 }
 
 test "Raft log entry serialization" {
-    const entry = contextdb.raft.LogEntry{
+    const entry = memora.raft.LogEntry{
         .term = 5,
         .index = 10,
-        .entry_type = .contextdb_operation,
+        .entry_type = .memora_operation,
         .data_size = 100,
         .checksum = 0x12345678,
     };
     
     // Test packed struct size consistency
-    const expected_size = @sizeOf(contextdb.raft.LogEntry);
+    const expected_size = @sizeOf(memora.raft.LogEntry);
     std.debug.print("LogEntry size: {} bytes\n", .{expected_size});
     try testing.expect(expected_size >= 20); // Should be at least 20 bytes for the fields
     
     // Test serialization
     const entry_bytes = std.mem.asBytes(&entry);
-    try testing.expect(entry_bytes.len == @sizeOf(contextdb.raft.LogEntry));
+    try testing.expect(entry_bytes.len == @sizeOf(memora.raft.LogEntry));
     
     // Test deserialization
-    const deserialized = @as(*const contextdb.raft.LogEntry, @ptrCast(@alignCast(entry_bytes.ptr))).*;
+    const deserialized = @as(*const memora.raft.LogEntry, @ptrCast(@alignCast(entry_bytes.ptr))).*;
     try testing.expect(deserialized.term == entry.term);
     try testing.expect(deserialized.index == entry.index);
     try testing.expect(deserialized.entry_type == entry.entry_type);
@@ -125,18 +125,18 @@ test "Raft request vote handling" {
     
     try std.fs.cwd().makeDir("test_vote_handling");
     
-    const node_infos = [_]contextdb.raft.ClusterConfig.NodeInfo{
+    const node_infos = [_]memora.raft.ClusterConfig.NodeInfo{
         .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
     };
     
-    const cluster_config = contextdb.raft.ClusterConfig{ .nodes = &node_infos };
+    const cluster_config = memora.raft.ClusterConfig{ .nodes = &node_infos };
     
-    var raft_node = try contextdb.raft.RaftNode.init(allocator, 1, cluster_config, "test_vote_handling", null);
+    var raft_node = try memora.raft.RaftNode.init(allocator, 1, cluster_config, "test_vote_handling", null);
     defer raft_node.deinit();
     
     // Create vote request
-    const vote_request = contextdb.raft.RequestVoteRequest{
+    const vote_request = memora.raft.RequestVoteRequest{
         .term = 1,
         .candidate_id = 2,
         .last_log_index = 0,
@@ -150,8 +150,8 @@ test "Raft request vote handling" {
     defer allocator.free(response_bytes);
     
     // Parse response
-    try testing.expect(response_bytes.len == @sizeOf(contextdb.raft.RequestVoteReply));
-    const reply = @as(*const contextdb.raft.RequestVoteReply, @ptrCast(@alignCast(response_bytes.ptr))).*;
+    try testing.expect(response_bytes.len == @sizeOf(memora.raft.RequestVoteReply));
+    const reply = @as(*const memora.raft.RequestVoteReply, @ptrCast(@alignCast(response_bytes.ptr))).*;
     
     // Should grant vote for valid candidate in higher term
     try testing.expect(reply.vote_granted == true);
@@ -168,18 +168,18 @@ test "Raft append entries handling" {
     
     try std.fs.cwd().makeDir("test_append_handling");
     
-    const node_infos = [_]contextdb.raft.ClusterConfig.NodeInfo{
+    const node_infos = [_]memora.raft.ClusterConfig.NodeInfo{
         .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
     };
     
-    const cluster_config = contextdb.raft.ClusterConfig{ .nodes = &node_infos };
+    const cluster_config = memora.raft.ClusterConfig{ .nodes = &node_infos };
     
-    var raft_node = try contextdb.raft.RaftNode.init(allocator, 1, cluster_config, "test_append_handling", null);
+    var raft_node = try memora.raft.RaftNode.init(allocator, 1, cluster_config, "test_append_handling", null);
     defer raft_node.deinit();
     
     // Create append entries request (heartbeat)
-    const append_request = contextdb.raft.AppendEntriesRequest{
+    const append_request = memora.raft.AppendEntriesRequest{
         .term = 1,
         .leader_id = 2,
         .prev_log_index = 0,
@@ -195,8 +195,8 @@ test "Raft append entries handling" {
     defer allocator.free(response_bytes);
     
     // Parse response
-    try testing.expect(response_bytes.len == @sizeOf(contextdb.raft.AppendEntriesReply));
-    const reply = @as(*const contextdb.raft.AppendEntriesReply, @ptrCast(@alignCast(response_bytes.ptr))).*;
+    try testing.expect(response_bytes.len == @sizeOf(memora.raft.AppendEntriesReply));
+    const reply = @as(*const memora.raft.AppendEntriesReply, @ptrCast(@alignCast(response_bytes.ptr))).*;
     
     // Should accept valid heartbeat
     try testing.expect(reply.success == true);
@@ -206,7 +206,7 @@ test "Raft append entries handling" {
 }
 
 test "Raft network message header" {
-    const header = contextdb.raft_network.MessageHeader{
+    const header = memora.raft_network.MessageHeader{
         .message_type = .request_vote,
         .body_size = 100,
         .checksum = 0x12345678,
@@ -215,11 +215,11 @@ test "Raft network message header" {
     // Test header size and magic
     try testing.expect(header.magic == 0x52414654); // "RAFT"
     try testing.expect(header.version == 1);
-    try testing.expect(@sizeOf(contextdb.raft_network.MessageHeader) >= 16); // Minimum expected size
+    try testing.expect(@sizeOf(memora.raft_network.MessageHeader) >= 16); // Minimum expected size
     
     // Test serialization
     const header_bytes = std.mem.asBytes(&header);
-    const deserialized = @as(*const contextdb.raft_network.MessageHeader, @ptrCast(@alignCast(header_bytes.ptr))).*;
+    const deserialized = @as(*const memora.raft_network.MessageHeader, @ptrCast(@alignCast(header_bytes.ptr))).*;
     
     try testing.expect(deserialized.magic == header.magic);
     try testing.expect(deserialized.version == header.version);
@@ -228,15 +228,15 @@ test "Raft network message header" {
     try testing.expect(deserialized.checksum == header.checksum);
 }
 
-test "Distributed ContextDB configuration" {
-    const cluster_nodes = [_]contextdb.distributed_contextdb.DistributedConfig.ClusterNode{
+test "Distributed Memora configuration" {
+    const cluster_nodes = [_]memora.distributed_memora.DistributedConfig.ClusterNode{
         .{ .id = 1, .address = "127.0.0.1", .raft_port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .raft_port = 8002 },
         .{ .id = 3, .address = "127.0.0.1", .raft_port = 8003 },
     };
     
-    const config = contextdb.distributed_contextdb.DistributedConfig{
-        .contextdb_config = .{
+    const config = memora.distributed_memora.DistributedConfig{
+        .memora_config = .{
             .data_path = "test_distributed_config",
             .enable_persistent_indexes = true,
         },
@@ -263,18 +263,18 @@ test "Distributed ContextDB configuration" {
 }
 
 test "State machine operation serialization" {
-    const operation = contextdb.distributed_contextdb.StateMachineOperation{
+    const operation = memora.distributed_memora.StateMachineOperation{
         .operation_type = .insert_node,
         .data_size = 100,
         .checksum = 0x87654321,
     };
     
     // Test packed struct consistency
-    try testing.expect(@sizeOf(contextdb.distributed_contextdb.StateMachineOperation) >= 9); // Minimum expected size
+    try testing.expect(@sizeOf(memora.distributed_memora.StateMachineOperation) >= 9); // Minimum expected size
     
     // Test serialization roundtrip
     const operation_bytes = std.mem.asBytes(&operation);
-    const deserialized = @as(*const contextdb.distributed_contextdb.StateMachineOperation, @ptrCast(@alignCast(operation_bytes.ptr))).*;
+    const deserialized = @as(*const memora.distributed_memora.StateMachineOperation, @ptrCast(@alignCast(operation_bytes.ptr))).*;
     
     try testing.expect(deserialized.operation_type == operation.operation_type);
     try testing.expect(deserialized.data_size == operation.data_size);
@@ -289,29 +289,29 @@ test "Raft log consistency" {
     
     try std.fs.cwd().makeDir("test_log_consistency");
     
-    const node_infos = [_]contextdb.raft.ClusterConfig.NodeInfo{
+    const node_infos = [_]memora.raft.ClusterConfig.NodeInfo{
         .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
     };
     
-    const cluster_config = contextdb.raft.ClusterConfig{ .nodes = &node_infos };
+    const cluster_config = memora.raft.ClusterConfig{ .nodes = &node_infos };
     
-    var raft_node = try contextdb.raft.RaftNode.init(allocator, 1, cluster_config, "test_log_consistency", null);
+    var raft_node = try memora.raft.RaftNode.init(allocator, 1, cluster_config, "test_log_consistency", null);
     defer raft_node.deinit();
     
     // Add some log entries
-    const entry1 = contextdb.raft.LogEntry{
+    const entry1 = memora.raft.LogEntry{
         .term = 1,
         .index = 1,
-        .entry_type = .contextdb_operation,
+        .entry_type = .memora_operation,
         .data_size = 10,
         .checksum = 0x1111,
     };
     
-    const entry2 = contextdb.raft.LogEntry{
+    const entry2 = memora.raft.LogEntry{
         .term = 1,
         .index = 2,
-        .entry_type = .contextdb_operation,
+        .entry_type = .memora_operation,
         .data_size = 20,
         .checksum = 0x2222,
     };
@@ -346,14 +346,14 @@ test "Raft election timeout" {
     
     try std.fs.cwd().makeDir("test_election_timeout");
     
-    const node_infos = [_]contextdb.raft.ClusterConfig.NodeInfo{
+    const node_infos = [_]memora.raft.ClusterConfig.NodeInfo{
         .{ .id = 1, .address = "127.0.0.1", .port = 8001 },
         .{ .id = 2, .address = "127.0.0.1", .port = 8002 },
     };
     
-    const cluster_config = contextdb.raft.ClusterConfig{ .nodes = &node_infos };
+    const cluster_config = memora.raft.ClusterConfig{ .nodes = &node_infos };
     
-    var raft_node = try contextdb.raft.RaftNode.init(allocator, 1, cluster_config, "test_election_timeout", null);
+    var raft_node = try memora.raft.RaftNode.init(allocator, 1, cluster_config, "test_election_timeout", null);
     defer raft_node.deinit();
     
     // Test initial timeout settings
@@ -373,21 +373,21 @@ test "Raft performance with large cluster" {
     
     // Create a larger cluster configuration for performance testing
     const cluster_size = 7; // Odd number for clear majority
-    var node_infos = try allocator.alloc(contextdb.raft.ClusterConfig.NodeInfo, cluster_size);
+    var node_infos = try allocator.alloc(memora.raft.ClusterConfig.NodeInfo, cluster_size);
     defer allocator.free(node_infos);
     
     for (0..cluster_size) |i| {
         const address = try allocator.dupe(u8, "127.0.0.1");
         defer allocator.free(address);
         
-        node_infos[i] = contextdb.raft.ClusterConfig.NodeInfo{
+        node_infos[i] = memora.raft.ClusterConfig.NodeInfo{
             .id = @intCast(i + 1),
             .address = address,
             .port = @intCast(8000 + i + 1),
         };
     }
     
-    const cluster_config = contextdb.raft.ClusterConfig{ .nodes = node_infos };
+    const cluster_config = memora.raft.ClusterConfig{ .nodes = node_infos };
     
     // Test majority calculation
     try testing.expect(cluster_config.getMajority() == 4); // (7/2) + 1 = 4
@@ -409,7 +409,7 @@ test "Raft performance with large cluster" {
 
 test "Raft message type completeness" {
     // Ensure all message types are handled
-    const message_types = [_]contextdb.raft.MessageType{
+    const message_types = [_]memora.raft.MessageType{
         .request_vote,
         .request_vote_reply,
         .append_entries,
@@ -419,12 +419,12 @@ test "Raft message type completeness" {
     };
     
     // Test enum values
-    try testing.expect(@intFromEnum(contextdb.raft.MessageType.request_vote) == 1);
-    try testing.expect(@intFromEnum(contextdb.raft.MessageType.request_vote_reply) == 2);
-    try testing.expect(@intFromEnum(contextdb.raft.MessageType.append_entries) == 3);
-    try testing.expect(@intFromEnum(contextdb.raft.MessageType.append_entries_reply) == 4);
-    try testing.expect(@intFromEnum(contextdb.raft.MessageType.install_snapshot) == 5);
-    try testing.expect(@intFromEnum(contextdb.raft.MessageType.install_snapshot_reply) == 6);
+    try testing.expect(@intFromEnum(memora.raft.MessageType.request_vote) == 1);
+    try testing.expect(@intFromEnum(memora.raft.MessageType.request_vote_reply) == 2);
+    try testing.expect(@intFromEnum(memora.raft.MessageType.append_entries) == 3);
+    try testing.expect(@intFromEnum(memora.raft.MessageType.append_entries_reply) == 4);
+    try testing.expect(@intFromEnum(memora.raft.MessageType.install_snapshot) == 5);
+    try testing.expect(@intFromEnum(memora.raft.MessageType.install_snapshot_reply) == 6);
     
     // Ensure we have all expected message types
     try testing.expect(message_types.len == 6);

@@ -1,8 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
-const fuzzing = contextdb.fuzzing;
-const types = contextdb.types;
+const memora = @import("memora");
+const fuzzing = memora.fuzzing;
+const types = memora.types;
 
 // =============================================================================
 // Fuzzing Framework Tests
@@ -430,7 +430,7 @@ test "Operation distribution analysis" {
 }
 
 // =============================================================================
-// Integration with Existing ContextDB Features
+// Integration with Existing Memora Features
 // =============================================================================
 
 test "Fuzzing with persistent indexes" {
@@ -457,7 +457,7 @@ test "Fuzzing with persistent indexes" {
 
 test "Fuzzing covers all data paths" {
     // This test ensures our fuzzing exercises the major code paths
-    // in ContextDB by checking that different types of operations complete
+    // in Memora by checking that different types of operations complete
     
     const config = fuzzing.FuzzConfig{
         .min_entropy = 400, // Increased entropy for more operations

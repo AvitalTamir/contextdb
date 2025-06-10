@@ -1,8 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
-const types = contextdb.types;
-const parallel = contextdb.parallel;
+const memora = @import("memora");
+const types = memora.types;
+const parallel = memora.parallel;
 
 // Comprehensive Parallel Processing Tests
 // Following TigerBeetle-style programming: deterministic, extensive, zero external dependencies

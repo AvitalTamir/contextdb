@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
-const types = contextdb.types;
+const memora = @import("memora");
+const types = memora.types;
 
 // Basic HNSW tests that pass without memory leaks
 // These demonstrate core functionality and deterministic behavior
@@ -9,7 +9,7 @@ const types = contextdb.types;
 test "HNSW basic initialization" {
     const allocator = testing.allocator;
     
-    var hnsw = try contextdb.vector.HNSWIndex.init(allocator, .{
+    var hnsw = try memora.vector.HNSWIndex.init(allocator, .{
         .max_connections = 16,
         .max_connections_layer0 = 32,
         .ef_construction = 200,
@@ -28,7 +28,7 @@ test "HNSW basic initialization" {
 test "HNSW single vector insertion" {
     const allocator = testing.allocator;
     
-    var hnsw = try contextdb.vector.HNSWIndex.init(allocator, .{
+    var hnsw = try memora.vector.HNSWIndex.init(allocator, .{
         .max_connections = 8,
         .max_connections_layer0 = 16,
         .ef_construction = 100,
@@ -56,7 +56,7 @@ test "HNSW single vector insertion" {
 test "HNSW deterministic construction" {
     const allocator = testing.allocator;
     
-    const config = contextdb.vector.HNSWConfig{
+    const config = memora.vector.HNSWConfig{
         .max_connections = 4,
         .max_connections_layer0 = 8,
         .ef_construction = 50,
@@ -65,10 +65,10 @@ test "HNSW deterministic construction" {
     };
     
     // Create two identical indexes
-    var hnsw1 = try contextdb.vector.HNSWIndex.init(allocator, config);
+    var hnsw1 = try memora.vector.HNSWIndex.init(allocator, config);
     defer hnsw1.deinit();
     
-    var hnsw2 = try contextdb.vector.HNSWIndex.init(allocator, config);
+    var hnsw2 = try memora.vector.HNSWIndex.init(allocator, config);
     defer hnsw2.deinit();
 
     // Insert same vector in both
@@ -90,7 +90,7 @@ test "HNSW deterministic construction" {
 test "HNSW empty search" {
     const allocator = testing.allocator;
     
-    var hnsw = try contextdb.vector.HNSWIndex.init(allocator, .{
+    var hnsw = try memora.vector.HNSWIndex.init(allocator, .{
         .max_connections = 4,
         .max_connections_layer0 = 8,
         .ef_construction = 50,
@@ -114,7 +114,7 @@ test "HNSW configuration validation" {
     const allocator = testing.allocator;
     
     // Test with minimal configuration
-    var hnsw = try contextdb.vector.HNSWIndex.init(allocator, .{
+    var hnsw = try memora.vector.HNSWIndex.init(allocator, .{
         .max_connections = 1,
         .max_connections_layer0 = 2,
         .ef_construction = 10,

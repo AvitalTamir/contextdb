@@ -3,7 +3,7 @@ const types = @import("types.zig");
 const config = @import("config.zig");
 const testing = std.testing;
 
-/// Monitoring and Metrics System for ContextDB
+/// Monitoring and Metrics System for Memora
 /// Provides Prometheus-compatible metrics and comprehensive observability
 /// Following TigerBeetle-style programming: deterministic, high-performance, zero dependencies
 
@@ -219,7 +219,7 @@ pub const RateTracker = struct {
     }
 };
 
-/// Comprehensive metrics collection for ContextDB
+/// Comprehensive metrics collection for Memora
 pub const MetricsCollector = struct {
     allocator: std.mem.Allocator,
     config: MonitoringConfig,
@@ -491,113 +491,113 @@ pub const MetricsCollector = struct {
         const writer = output.writer();
         
         // Help and type annotations
-        try writer.print("# HELP contextdb_node_inserts_total Total number of node insert operations\n", .{});
-        try writer.print("# TYPE contextdb_node_inserts_total counter\n", .{});
-        try writer.print("contextdb_node_inserts_total {}\n", .{self.node_inserts_total.get()});
+        try writer.print("# HELP memora_node_inserts_total Total number of node insert operations\n", .{});
+        try writer.print("# TYPE memora_node_inserts_total counter\n", .{});
+        try writer.print("memora_node_inserts_total {}\n", .{self.node_inserts_total.get()});
         
-        try writer.print("# HELP contextdb_edge_inserts_total Total number of edge insert operations\n", .{});
-        try writer.print("# TYPE contextdb_edge_inserts_total counter\n", .{});
-        try writer.print("contextdb_edge_inserts_total {}\n", .{self.edge_inserts_total.get()});
+        try writer.print("# HELP memora_edge_inserts_total Total number of edge insert operations\n", .{});
+        try writer.print("# TYPE memora_edge_inserts_total counter\n", .{});
+        try writer.print("memora_edge_inserts_total {}\n", .{self.edge_inserts_total.get()});
         
-        try writer.print("# HELP contextdb_vector_inserts_total Total number of vector insert operations\n", .{});
-        try writer.print("# TYPE contextdb_vector_inserts_total counter\n", .{});
-        try writer.print("contextdb_vector_inserts_total {}\n", .{self.vector_inserts_total.get()});
+        try writer.print("# HELP memora_vector_inserts_total Total number of vector insert operations\n", .{});
+        try writer.print("# TYPE memora_vector_inserts_total counter\n", .{});
+        try writer.print("memora_vector_inserts_total {}\n", .{self.vector_inserts_total.get()});
         
-        try writer.print("# HELP contextdb_similarity_queries_total Total number of similarity query operations\n", .{});
-        try writer.print("# TYPE contextdb_similarity_queries_total counter\n", .{});
-        try writer.print("contextdb_similarity_queries_total {}\n", .{self.similarity_queries_total.get()});
+        try writer.print("# HELP memora_similarity_queries_total Total number of similarity query operations\n", .{});
+        try writer.print("# TYPE memora_similarity_queries_total counter\n", .{});
+        try writer.print("memora_similarity_queries_total {}\n", .{self.similarity_queries_total.get()});
         
-        try writer.print("# HELP contextdb_graph_queries_total Total number of graph query operations\n", .{});
-        try writer.print("# TYPE contextdb_graph_queries_total counter\n", .{});
-        try writer.print("contextdb_graph_queries_total {}\n", .{self.graph_queries_total.get()});
+        try writer.print("# HELP memora_graph_queries_total Total number of graph query operations\n", .{});
+        try writer.print("# TYPE memora_graph_queries_total counter\n", .{});
+        try writer.print("memora_graph_queries_total {}\n", .{self.graph_queries_total.get()});
         
-        try writer.print("# HELP contextdb_hybrid_queries_total Total number of hybrid query operations\n", .{});
-        try writer.print("# TYPE contextdb_hybrid_queries_total counter\n", .{});
-        try writer.print("contextdb_hybrid_queries_total {}\n", .{self.hybrid_queries_total.get()});
+        try writer.print("# HELP memora_hybrid_queries_total Total number of hybrid query operations\n", .{});
+        try writer.print("# TYPE memora_hybrid_queries_total counter\n", .{});
+        try writer.print("memora_hybrid_queries_total {}\n", .{self.hybrid_queries_total.get()});
         
         // Error metrics
-        try writer.print("# HELP contextdb_insert_errors_total Total number of insert errors\n", .{});
-        try writer.print("# TYPE contextdb_insert_errors_total counter\n", .{});
-        try writer.print("contextdb_insert_errors_total {}\n", .{self.insert_errors_total.get()});
+        try writer.print("# HELP memora_insert_errors_total Total number of insert errors\n", .{});
+        try writer.print("# TYPE memora_insert_errors_total counter\n", .{});
+        try writer.print("memora_insert_errors_total {}\n", .{self.insert_errors_total.get()});
         
-        try writer.print("# HELP contextdb_query_errors_total Total number of query errors\n", .{});
-        try writer.print("# TYPE contextdb_query_errors_total counter\n", .{});
-        try writer.print("contextdb_query_errors_total {}\n", .{self.query_errors_total.get()});
+        try writer.print("# HELP memora_query_errors_total Total number of query errors\n", .{});
+        try writer.print("# TYPE memora_query_errors_total counter\n", .{});
+        try writer.print("memora_query_errors_total {}\n", .{self.query_errors_total.get()});
         
-        try writer.print("# HELP contextdb_system_errors_total Total number of system errors\n", .{});
-        try writer.print("# TYPE contextdb_system_errors_total counter\n", .{});
-        try writer.print("contextdb_system_errors_total {}\n", .{self.system_errors_total.get()});
+        try writer.print("# HELP memora_system_errors_total Total number of system errors\n", .{});
+        try writer.print("# TYPE memora_system_errors_total counter\n", .{});
+        try writer.print("memora_system_errors_total {}\n", .{self.system_errors_total.get()});
         
         // Histogram metrics
         if (self.insert_duration_histogram) |histogram| {
-            try writer.print("# HELP contextdb_insert_duration_histogram_us Insert operation duration in microseconds\n", .{});
-            try writer.print("# TYPE contextdb_insert_duration_histogram_us histogram\n", .{});
+            try writer.print("# HELP memora_insert_duration_histogram_us Insert operation duration in microseconds\n", .{});
+            try writer.print("# TYPE memora_insert_duration_histogram_us histogram\n", .{});
             for (histogram.buckets, 0..) |bucket, i| {
                 const le_value = if (std.math.isInf(bucket)) "+Inf" else try std.fmt.allocPrint(allocator, "{d}", .{bucket});
                 defer if (!std.math.isInf(bucket)) allocator.free(le_value);
-                try writer.print("contextdb_insert_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, histogram.counts[i] });
+                try writer.print("memora_insert_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, histogram.counts[i] });
             }
-            try writer.print("contextdb_insert_duration_histogram_us_count {}\n", .{histogram.total_count});
-            try writer.print("contextdb_insert_duration_histogram_us_sum {d}\n", .{histogram.total_sum});
+            try writer.print("memora_insert_duration_histogram_us_count {}\n", .{histogram.total_count});
+            try writer.print("memora_insert_duration_histogram_us_sum {d}\n", .{histogram.total_sum});
         }
         
         if (self.query_duration_histogram) |histogram| {
-            try writer.print("# HELP contextdb_query_duration_histogram_us Query operation duration in microseconds\n", .{});
-            try writer.print("# TYPE contextdb_query_duration_histogram_us histogram\n", .{});
+            try writer.print("# HELP memora_query_duration_histogram_us Query operation duration in microseconds\n", .{});
+            try writer.print("# TYPE memora_query_duration_histogram_us histogram\n", .{});
             for (histogram.buckets, 0..) |bucket, i| {
                 const le_value = if (std.math.isInf(bucket)) "+Inf" else try std.fmt.allocPrint(allocator, "{d}", .{bucket});
                 defer if (!std.math.isInf(bucket)) allocator.free(le_value);
-                try writer.print("contextdb_query_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, histogram.counts[i] });
+                try writer.print("memora_query_duration_histogram_us_bucket{{le=\"{s}\"}} {}\n", .{ le_value, histogram.counts[i] });
             }
-            try writer.print("contextdb_query_duration_histogram_us_count {}\n", .{histogram.total_count});
-            try writer.print("contextdb_query_duration_histogram_us_sum {d}\n", .{histogram.total_sum});
+            try writer.print("memora_query_duration_histogram_us_count {}\n", .{histogram.total_count});
+            try writer.print("memora_query_duration_histogram_us_sum {d}\n", .{histogram.total_sum});
         }
         
         // Gauge metrics
-        try writer.print("# HELP contextdb_memory_usage_bytes Current memory usage in bytes\n", .{});
-        try writer.print("# TYPE contextdb_memory_usage_bytes gauge\n", .{});
-        try writer.print("contextdb_memory_usage_bytes {}\n", .{self.memory_usage_bytes.get()});
+        try writer.print("# HELP memora_memory_usage_bytes Current memory usage in bytes\n", .{});
+        try writer.print("# TYPE memora_memory_usage_bytes gauge\n", .{});
+        try writer.print("memora_memory_usage_bytes {}\n", .{self.memory_usage_bytes.get()});
         
-        try writer.print("# HELP contextdb_heap_allocations Current number of heap allocations\n", .{});
-        try writer.print("# TYPE contextdb_heap_allocations gauge\n", .{});
-        try writer.print("contextdb_heap_allocations {}\n", .{self.heap_allocations.get()});
+        try writer.print("# HELP memora_heap_allocations Current number of heap allocations\n", .{});
+        try writer.print("# TYPE memora_heap_allocations gauge\n", .{});
+        try writer.print("memora_heap_allocations {}\n", .{self.heap_allocations.get()});
         
-        try writer.print("# HELP contextdb_active_connections Current number of active connections\n", .{});
-        try writer.print("# TYPE contextdb_active_connections gauge\n", .{});
-        try writer.print("contextdb_active_connections {}\n", .{self.active_connections.get()});
+        try writer.print("# HELP memora_active_connections Current number of active connections\n", .{});
+        try writer.print("# TYPE memora_active_connections gauge\n", .{});
+        try writer.print("memora_active_connections {}\n", .{self.active_connections.get()});
         
-        try writer.print("# HELP contextdb_total_nodes Current number of nodes in database\n", .{});
-        try writer.print("# TYPE contextdb_total_nodes gauge\n", .{});
-        try writer.print("contextdb_total_nodes {}\n", .{self.total_nodes.get()});
+        try writer.print("# HELP memora_total_nodes Current number of nodes in database\n", .{});
+        try writer.print("# TYPE memora_total_nodes gauge\n", .{});
+        try writer.print("memora_total_nodes {}\n", .{self.total_nodes.get()});
         
-        try writer.print("# HELP contextdb_total_edges Current number of edges in database\n", .{});
-        try writer.print("# TYPE contextdb_total_edges gauge\n", .{});
-        try writer.print("contextdb_total_edges {}\n", .{self.total_edges.get()});
+        try writer.print("# HELP memora_total_edges Current number of edges in database\n", .{});
+        try writer.print("# TYPE memora_total_edges gauge\n", .{});
+        try writer.print("memora_total_edges {}\n", .{self.total_edges.get()});
         
-        try writer.print("# HELP contextdb_total_vectors Current number of vectors in database\n", .{});
-        try writer.print("# TYPE contextdb_total_vectors gauge\n", .{});
-        try writer.print("contextdb_total_vectors {}\n", .{self.total_vectors.get()});
+        try writer.print("# HELP memora_total_vectors Current number of vectors in database\n", .{});
+        try writer.print("# TYPE memora_total_vectors gauge\n", .{});
+        try writer.print("memora_total_vectors {}\n", .{self.total_vectors.get()});
         
-        try writer.print("# HELP contextdb_log_entries Current number of log entries\n", .{});
-        try writer.print("# TYPE contextdb_log_entries gauge\n", .{});
-        try writer.print("contextdb_log_entries {}\n", .{self.log_entries.get()});
+        try writer.print("# HELP memora_log_entries Current number of log entries\n", .{});
+        try writer.print("# TYPE memora_log_entries gauge\n", .{});
+        try writer.print("memora_log_entries {}\n", .{self.log_entries.get()});
         
         // System metrics
-        try writer.print("# HELP contextdb_uptime_seconds Uptime in seconds since startup\n", .{});
-        try writer.print("# TYPE contextdb_uptime_seconds gauge\n", .{});
-        try writer.print("contextdb_uptime_seconds {}\n", .{self.getUptimeSeconds()});
+        try writer.print("# HELP memora_uptime_seconds Uptime in seconds since startup\n", .{});
+        try writer.print("# TYPE memora_uptime_seconds gauge\n", .{});
+        try writer.print("memora_uptime_seconds {}\n", .{self.getUptimeSeconds()});
         
-        try writer.print("# HELP contextdb_insert_rate_per_second Current insert operations per second\n", .{});
-        try writer.print("# TYPE contextdb_insert_rate_per_second gauge\n", .{});
-        try writer.print("contextdb_insert_rate_per_second {d:.2}\n", .{self.getInsertRate()});
+        try writer.print("# HELP memora_insert_rate_per_second Current insert operations per second\n", .{});
+        try writer.print("# TYPE memora_insert_rate_per_second gauge\n", .{});
+        try writer.print("memora_insert_rate_per_second {d:.2}\n", .{self.getInsertRate()});
         
-        try writer.print("# HELP contextdb_query_rate_per_second Current query operations per second\n", .{});
-        try writer.print("# TYPE contextdb_query_rate_per_second gauge\n", .{});
-        try writer.print("contextdb_query_rate_per_second {d:.2}\n", .{self.getQueryRate()});
+        try writer.print("# HELP memora_query_rate_per_second Current query operations per second\n", .{});
+        try writer.print("# TYPE memora_query_rate_per_second gauge\n", .{});
+        try writer.print("memora_query_rate_per_second {d:.2}\n", .{self.getQueryRate()});
         
-        try writer.print("# HELP contextdb_error_rate_percent Current error rate as percentage\n", .{});
-        try writer.print("# TYPE contextdb_error_rate_percent gauge\n", .{});
-        try writer.print("contextdb_error_rate_percent {d:.2}\n", .{self.getErrorRate()});
+        try writer.print("# HELP memora_error_rate_percent Current error rate as percentage\n", .{});
+        try writer.print("# TYPE memora_error_rate_percent gauge\n", .{});
+        try writer.print("memora_error_rate_percent {d:.2}\n", .{self.getErrorRate()});
         
         return try output.toOwnedSlice();
     }

@@ -1,8 +1,8 @@
 const std = @import("std");
-const contextdb = @import("contextdb");
+const memora = @import("memora");
 
-const ContextDB = contextdb.ContextDB;
-const mcp_server = contextdb.mcp_server;
+const Memora = memora.Memora;
+const mcp_server = memora.mcp_server;
 
 /// Standalone MCP server for Memora - provides Model Context Protocol access to the memory database
 pub fn main() !void {
@@ -41,14 +41,14 @@ pub fn main() !void {
     std.debug.print("Data path: {s}\n", .{data_path});
     std.debug.print("Transport: {s}\n", .{transport_type});
 
-    // Initialize ContextDB for memory storage
-    const config = contextdb.ContextDBConfig{
+    // Initialize Memora for memory storage
+    const config = memora.MemoraConfig{
         .data_path = data_path,
         .auto_snapshot_interval = 100,
         .enable_persistent_indexes = true,
     };
 
-    var db = ContextDB.init(allocator, config, null) catch |err| {
+    var db = Memora.init(allocator, config, null) catch |err| {
         std.debug.print("Failed to initialize Memora database: {}\n", .{err});
         return;
     };
@@ -94,28 +94,28 @@ fn printHelp() void {
     std.debug.print("  Configure your LLM client to use this server as an MCP server.\n", .{});
 }
 
-fn shouldPopulateSampleMemories(db: *ContextDB) !bool {
+fn shouldPopulateSampleMemories(db: *Memora) !bool {
     const stats = db.getStats();
     return stats.node_count == 0 and stats.edge_count == 0 and stats.vector_count == 0;
 }
 
-fn populateSampleMemories(db: *ContextDB) !void {
+fn populateSampleMemories(db: *Memora) !void {
     std.debug.print("Populating sample memories for LLM integration...\n", .{});
 
     // Create sample memory nodes representing different types of memories
-    try db.insertNode(contextdb.types.Node.init(1, "UserPreference_ConciseHelp"));
-    try db.insertNode(contextdb.types.Node.init(2, "ConversationContext_Programming"));
-    try db.insertNode(contextdb.types.Node.init(3, "LearnedFact_UserSkillLevel"));
-    try db.insertNode(contextdb.types.Node.init(4, "Experience_SuccessfulSolution"));
-    try db.insertNode(contextdb.types.Node.init(5, "Concept_AsyncProgramming"));
-    try db.insertNode(contextdb.types.Node.init(6, "Pattern_CodeReviewStyle"));
+    try db.insertNode(memora.types.Node.init(1, "UserPreference_ConciseHelp"));
+    try db.insertNode(memora.types.Node.init(2, "ConversationContext_Programming"));
+    try db.insertNode(memora.types.Node.init(3, "LearnedFact_UserSkillLevel"));
+    try db.insertNode(memora.types.Node.init(4, "Experience_SuccessfulSolution"));
+    try db.insertNode(memora.types.Node.init(5, "Concept_AsyncProgramming"));
+    try db.insertNode(memora.types.Node.init(6, "Pattern_CodeReviewStyle"));
 
     // Create memory relationships
-    try db.insertEdge(contextdb.types.Edge.init(1, 2, contextdb.types.EdgeKind.related));    // User preferences related to programming context
-    try db.insertEdge(contextdb.types.Edge.init(2, 3, contextdb.types.EdgeKind.child_of));   // Context contains skill level info
-    try db.insertEdge(contextdb.types.Edge.init(3, 4, contextdb.types.EdgeKind.links));      // Skill level linked to successful solution
-    try db.insertEdge(contextdb.types.Edge.init(4, 5, contextdb.types.EdgeKind.related));    // Solution related to async programming
-    try db.insertEdge(contextdb.types.Edge.init(5, 6, contextdb.types.EdgeKind.similar_to)); // Async concepts similar to review patterns
+    try db.insertEdge(memora.types.Edge.init(1, 2, memora.types.EdgeKind.related));    // User preferences related to programming context
+    try db.insertEdge(memora.types.Edge.init(2, 3, memora.types.EdgeKind.child_of));   // Context contains skill level info
+    try db.insertEdge(memora.types.Edge.init(3, 4, memora.types.EdgeKind.links));      // Skill level linked to successful solution
+    try db.insertEdge(memora.types.Edge.init(4, 5, memora.types.EdgeKind.related));    // Solution related to async programming
+    try db.insertEdge(memora.types.Edge.init(5, 6, memora.types.EdgeKind.similar_to)); // Async concepts similar to review patterns
 
     // Create semantic embeddings for memory retrieval
     const preference_embedding = generateMemoryEmbedding(0.9, 0.2, 0.1, 0.8);      // User preference signal
@@ -125,12 +125,12 @@ fn populateSampleMemories(db: *ContextDB) !void {
     const concept_embedding = generateMemoryEmbedding(0.3, 0.7, 0.8, 0.9);        // Technical concept
     const pattern_embedding = generateMemoryEmbedding(0.6, 0.5, 0.7, 0.8);        // Code pattern
 
-    try db.insertVector(contextdb.types.Vector.init(1, &preference_embedding));
-    try db.insertVector(contextdb.types.Vector.init(2, &context_embedding));
-    try db.insertVector(contextdb.types.Vector.init(3, &skill_embedding));
-    try db.insertVector(contextdb.types.Vector.init(4, &solution_embedding));
-    try db.insertVector(contextdb.types.Vector.init(5, &concept_embedding));
-    try db.insertVector(contextdb.types.Vector.init(6, &pattern_embedding));
+    try db.insertVector(memora.types.Vector.init(1, &preference_embedding));
+    try db.insertVector(memora.types.Vector.init(2, &context_embedding));
+    try db.insertVector(memora.types.Vector.init(3, &skill_embedding));
+    try db.insertVector(memora.types.Vector.init(4, &solution_embedding));
+    try db.insertVector(memora.types.Vector.init(5, &concept_embedding));
+    try db.insertVector(memora.types.Vector.init(6, &pattern_embedding));
 
     std.debug.print("Sample memories created:\n", .{});
     std.debug.print("  - User preferences and communication style\n", .{});

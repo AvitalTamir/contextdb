@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 
-/// High-performance compression system for ContextDB
+/// High-performance compression system for Memora
 /// Optimized for vector data, persistent indexes, and snapshot storage
 pub const CompressionEngine = struct {
     allocator: std.mem.Allocator,

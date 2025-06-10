@@ -2,7 +2,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const config = @import("config.zig");
 
-/// Iceberg-style snapshot manager for ContextDB
+/// Iceberg-style snapshot manager for Memora
 /// Creates immutable snapshots with metadata and data files
 pub const SnapshotManager = struct {
     allocator: std.mem.Allocator,

@@ -1,6 +1,6 @@
-# ContextDB Fuzzing Framework 🧪
+# Memora Fuzzing Framework 🧪
 
-**TigerBeetle-Inspired Randomized Testing for ContextDB**
+**TigerBeetle-Inspired Randomized Testing for Memora**
 
 ## 🚀 Quick Start - Continuous Fuzzing Commands
 
@@ -62,7 +62,7 @@ zig build fuzz -- --help
 ### **1. Single-Node Mode (`--mode single-node`)**
 **Best for:** Daily development, CI/CD pipelines, quick testing
 
-Tests core ContextDB functionality:
+Tests core Memora functionality:
 - ✅ Node/edge/vector insertions
 - ✅ Graph traversal queries  
 - ✅ Vector similarity searches
@@ -144,7 +144,7 @@ No persistent indexes found, loading from log...
 Saved persistent indexes in 234µs
 ```
 
-**This is normal!** Each fuzzing iteration creates a fresh ContextDB instance. The persistent index messages are just startup overhead - the fuzzing is actually testing:
+**This is normal!** Each fuzzing iteration creates a fresh Memora instance. The persistent index messages are just startup overhead - the fuzzing is actually testing:
 
 ✅ **Database Operations**: Insert/query nodes, edges, vectors  
 ✅ **Graph Traversal**: BFS/DFS with random depths  
@@ -333,7 +333,7 @@ test "reproduce specific failure" {
 
 ## Overview
 
-ContextDB includes a comprehensive fuzzing framework inspired by [TigerBeetle's approach to randomized testing](https://tigerbeetle.com/blog/2023-03-28-random-fuzzy-thoughts/). This framework provides:
+Memora includes a comprehensive fuzzing framework inspired by [TigerBeetle's approach to randomized testing](https://tigerbeetle.com/blog/2023-03-28-random-fuzzy-thoughts/). This framework provides:
 
 - **Finite PRNG**: Deterministic, reproducible random testing
 - **Structured Data Generation**: Generate complex database operations from entropy
@@ -432,11 +432,11 @@ const scenario = DistributedScenario.init("leader_election", &[_]TestPredicate{
 }, 1000); // max ticks
 ```
 
-## Integration with ContextDB
+## Integration with Memora
 
 ### Test Coverage
 
-The fuzzing framework exercises all major ContextDB components:
+The fuzzing framework exercises all major Memora components:
 
 | Component | Coverage |
 |-----------|----------|
@@ -550,7 +550,7 @@ const config = FuzzConfig{
 
 ## Contributing
 
-The fuzzing framework follows ContextDB's development principles:
+The fuzzing framework follows Memora's development principles:
 
 1. **Deterministic**: All tests must be reproducible
 2. **TigerBeetle-Inspired**: Follow established patterns from the blog post
@@ -568,4 +568,4 @@ The fuzzing framework follows ContextDB's development principles:
 
 ---
 
-**Remember**: The goal of fuzzing is not just finding bugs, but building confidence in ContextDB's reliability under unexpected conditions. Every fuzzing run makes the system more robust! 🚀 
+**Remember**: The goal of fuzzing is not just finding bugs, but building confidence in Memora's reliability under unexpected conditions. Every fuzzing run makes the system more robust! 🚀 

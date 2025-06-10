@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
-const ContextDB = @import("main.zig").ContextDB;
-const DistributedContextDB = @import("distributed_contextdb.zig").DistributedContextDB;
+const Memora = @import("main.zig").Memora;
+const DistributedMemora = @import("distributed_memora.zig").DistributedMemora;
 const config = @import("config.zig");
 
 /// HTTP Status codes
@@ -155,13 +155,13 @@ pub const HttpConfig = struct {
 /// API Server
 pub const ApiServer = struct {
     allocator: std.mem.Allocator,
-    db: *ContextDB,
-    distributed_db: ?*DistributedContextDB,
+    db: *Memora,
+    distributed_db: ?*DistributedMemora,
     port: u16,
     server: ?std.net.Server,
     http_config: HttpConfig,
 
-    pub fn init(allocator: std.mem.Allocator, db: *ContextDB, distributed_db: ?*DistributedContextDB, port: ?u16, global_config: ?config.Config) ApiServer {
+    pub fn init(allocator: std.mem.Allocator, db: *Memora, distributed_db: ?*DistributedMemora, port: ?u16, global_config: ?config.Config) ApiServer {
         const global_cfg = global_config orelse config.Config{};
         const http_cfg = HttpConfig.fromConfig(global_cfg, port);
         
@@ -179,7 +179,7 @@ pub const ApiServer = struct {
         const address = std.net.Address.parseIp("127.0.0.1", self.port) catch unreachable;
         self.server = try address.listen(.{ .reuse_address = true });
         
-        std.debug.print("ContextDB HTTP API server listening on http://127.0.0.1:{}\n", .{self.port});
+        std.debug.print("Memora HTTP API server listening on http://127.0.0.1:{}\n", .{self.port});
         std.debug.print("Available endpoints:\n");
         std.debug.print("  POST   /api/v1/nodes           - Insert node\n");
         std.debug.print("  GET    /api/v1/nodes/:id       - Get node\n");
@@ -825,7 +825,7 @@ pub const ApiServer = struct {
 
         const batch_req = json_parser.value;
         
-        // Convert request types to ContextDB types
+        // Convert request types to Memora types
         var nodes = std.ArrayList(types.Node).init(self.allocator);
         defer nodes.deinit();
         for (batch_req.nodes) |node_req| {

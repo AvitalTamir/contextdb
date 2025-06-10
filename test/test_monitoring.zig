@@ -1,8 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
-const contextdb = @import("contextdb");
-const monitoring = contextdb.monitoring;
-const types = contextdb.types;
+const memora = @import("memora");
+const monitoring = memora.monitoring;
+const types = memora.types;
 
 test "HistogramBuckets basic functionality" {
     const allocator = testing.allocator;
@@ -233,8 +233,8 @@ test "MetricsCollector Prometheus export" {
     // Basic validation - should contain Prometheus format elements
     try testing.expect(std.mem.indexOf(u8, prometheus, "# HELP") != null);
     try testing.expect(std.mem.indexOf(u8, prometheus, "# TYPE") != null);
-    try testing.expect(std.mem.indexOf(u8, prometheus, "contextdb_node_inserts_total") != null);
-    try testing.expect(std.mem.indexOf(u8, prometheus, "contextdb_total_nodes") != null);
+    try testing.expect(std.mem.indexOf(u8, prometheus, "memora_node_inserts_total") != null);
+    try testing.expect(std.mem.indexOf(u8, prometheus, "memora_total_nodes") != null);
     try testing.expect(std.mem.indexOf(u8, prometheus, "histogram") != null);
     try testing.expect(std.mem.indexOf(u8, prometheus, "counter") != null);
     try testing.expect(std.mem.indexOf(u8, prometheus, "gauge") != null);
@@ -277,22 +277,22 @@ test "HealthCheck functionality" {
     try testing.expect(std.mem.indexOf(u8, json, "timestamp") != null);
 }
 
-test "ContextDB metrics integration" {
+test "Memora metrics integration" {
     const allocator = testing.allocator;
     
     // Clean up any existing test data
-    std.fs.cwd().deleteTree("test_monitoring_contextdb") catch {};
-    defer std.fs.cwd().deleteTree("test_monitoring_contextdb") catch {};
+    std.fs.cwd().deleteTree("test_monitoring_memora") catch {};
+    defer std.fs.cwd().deleteTree("test_monitoring_memora") catch {};
     
-    const config = contextdb.ContextDBConfig{
-        .data_path = "test_monitoring_contextdb",
+    const config = memora.MemoraConfig{
+        .data_path = "test_monitoring_memora",
         .auto_snapshot_interval = null,
         .s3_bucket = null,
         .s3_region = null,
         .s3_prefix = null,
     };
 
-    var db = try contextdb.ContextDB.init(allocator, config, null);
+    var db = try memora.Memora.init(allocator, config, null);
     defer db.deinit();
 
     // Initial metrics should be zero

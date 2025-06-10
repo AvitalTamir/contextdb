@@ -2,7 +2,7 @@ const std = @import("std");
 
 const config = @import("config.zig");
 
-/// Raft Consensus Implementation for ContextDB
+/// Raft Consensus Implementation for Memora
 /// Following the Raft paper: "In Search of an Understandable Consensus Algorithm"
 /// Designed for TigerBeetle-style deterministic operation
 
@@ -33,7 +33,7 @@ pub const LogEntry = packed struct {
     // data follows after this header
     
     pub const EntryType = enum(u8) {
-        contextdb_operation = 1,
+        memora_operation = 1,
         configuration_change = 2,
         no_op = 3,
     };

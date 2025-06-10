@@ -1,24 +1,24 @@
 const std = @import("std");
 const testing = std.testing;
 
-// Import the ContextDB module
-const contextdb = @import("contextdb");
+// Import the Memora module
+const memora = @import("memora");
 
 // Re-export individual modules for convenience
-const types = contextdb.types;
-const log = contextdb.log;
-const graph = contextdb.graph;
-const vector = contextdb.vector;
-const snapshot = contextdb.snapshot;
-const main = contextdb;
+const types = memora.types;
+const log = memora.log;
+const graph = memora.graph;
+const vector = memora.vector;
+const snapshot = memora.snapshot;
+const main = memora;
 
-test "ContextDB full integration test" {
+test "Memora full integration test" {
     const allocator = testing.allocator;
     
     // Clean up any existing test data at the beginning
     std.fs.cwd().deleteTree("integration_test_db") catch {};
     
-    const config = main.ContextDBConfig{
+    const config = main.MemoraConfig{
         .data_path = "integration_test_db",
         .auto_snapshot_interval = null, // Disable auto-snapshots to prevent pointer invalidation
         .s3_bucket = null,
@@ -26,7 +26,7 @@ test "ContextDB full integration test" {
         .s3_prefix = null,
     };
 
-    var db = try main.ContextDB.init(allocator, config, null);
+    var db = try main.Memora.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("integration_test_db") catch {};
 
@@ -121,13 +121,13 @@ test "ContextDB full integration test" {
     try testing.expect(final_stats.vector_count == 5);
 }
 
-test "ContextDB deterministic queries" {
+test "Memora deterministic queries" {
     const allocator = testing.allocator;
     
     // Clean up any existing test data at the beginning
     std.fs.cwd().deleteTree("deterministic_test_db") catch {};
     
-    const config = main.ContextDBConfig{
+    const config = main.MemoraConfig{
         .data_path = "deterministic_test_db",
         .auto_snapshot_interval = null,
         .s3_bucket = null,
@@ -135,7 +135,7 @@ test "ContextDB deterministic queries" {
         .s3_prefix = null,
     };
 
-    var db = try main.ContextDB.init(allocator, config, null);
+    var db = try main.Memora.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("deterministic_test_db") catch {};
 
@@ -202,13 +202,13 @@ test "ContextDB deterministic queries" {
     }
 }
 
-test "ContextDB crash recovery simulation" {
+test "Memora crash recovery simulation" {
     const allocator = testing.allocator;
     
     // Clean up any existing test data
     std.fs.cwd().deleteTree("recovery_test_db") catch {};
     
-    const config = main.ContextDBConfig{
+    const config = main.MemoraConfig{
         .data_path = "recovery_test_db",
         .auto_snapshot_interval = null, // Disable auto-snapshot for deterministic test
         .s3_bucket = null,
@@ -218,7 +218,7 @@ test "ContextDB crash recovery simulation" {
 
     // Phase 1: Create initial database and add data
     {
-        var db = try main.ContextDB.init(allocator, config, null);
+        var db = try main.Memora.init(allocator, config, null);
         defer db.deinit();
 
         // Add some data that should be in the snapshot
@@ -243,7 +243,7 @@ test "ContextDB crash recovery simulation" {
 
     // Phase 2: Simulate crash and recovery
     {
-        var db = try main.ContextDB.init(allocator, config, null);
+        var db = try main.Memora.init(allocator, config, null);
         defer db.deinit();
 
         // Load from storage (should recover from snapshot + log)
@@ -260,13 +260,13 @@ test "ContextDB crash recovery simulation" {
     std.fs.cwd().deleteTree("recovery_test_db") catch {};
 }
 
-test "ContextDB performance and memory usage" {
+test "Memora performance and memory usage" {
     const allocator = testing.allocator;
     
     // Clean up any existing test data
     std.fs.cwd().deleteTree("perf_test_db") catch {};
     
-    const config = main.ContextDBConfig{
+    const config = main.MemoraConfig{
         .data_path = "perf_test_db",
         .auto_snapshot_interval = 100, // Snapshot every 100 operations
         .s3_bucket = null,
@@ -274,7 +274,7 @@ test "ContextDB performance and memory usage" {
         .s3_prefix = null,
     };
 
-    var db = try main.ContextDB.init(allocator, config, null);
+    var db = try main.Memora.init(allocator, config, null);
     defer db.deinit();
     defer std.fs.cwd().deleteTree("perf_test_db") catch {};
 

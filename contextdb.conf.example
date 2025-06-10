@@ -1,6 +1,6 @@
-# ContextDB Configuration File
-# This file contains configuration settings for ContextDB
-# Copy this file to 'contextdb.conf' and modify as needed
+# Memora Configuration File
+# This file contains configuration settings for Memora
+# Copy this file to 'memora.conf' and modify as needed
 
 # Log Settings
 # The initial size of the append-only log file
@@ -182,8 +182,8 @@ s3_bucket = ""
 # AWS region for S3 operations
 s3_region = us-east-1
 
-# S3 prefix for all ContextDB files
-s3_prefix = contextdb/
+# S3 prefix for all Memora files
+s3_prefix = memora/
 
 # Upload timeout in milliseconds (5 minutes default)
 s3_upload_timeout_ms = 300000
