@@ -387,6 +387,15 @@ pub const MetricsCollector = struct {
         self.system_errors_total.increment();
     }
     
+    pub fn recordLogCompaction(self: *MetricsCollector, duration_us: u64, entries_removed: u64) void {
+        // Record the compaction operation
+        if (self.insert_duration_histogram) |histogram| {
+            histogram.observe(@floatFromInt(duration_us));
+        }
+        // Could add specific compaction metrics here in the future
+        _ = entries_removed;
+    }
+    
     // Gauge updates
     
     pub fn updateDatabaseStats(self: *MetricsCollector, stats: types.DatabaseStats) void {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const config = @import("config.zig");
+const compression = @import("compression.zig");
 
 /// Append-only binary log for Memora
 /// Follows TigerBeetle design principles: single-threaded, deterministic, no locks
@@ -13,6 +14,7 @@ pub const AppendLog = struct {
     entry_count: u64,
     log_path: []const u8,
     config: config.Config,
+    compression_engine: ?*compression.CompressionEngine,
 
     const ENTRY_SIZE = @sizeOf(types.LogEntry);
 
@@ -58,6 +60,18 @@ pub const AppendLog = struct {
         // Count existing entries
         const entry_count = if (stat.size > 0) stat.size / ENTRY_SIZE else 0;
 
+        // Initialize compression engine if enabled
+        var compression_engine: ?*compression.CompressionEngine = null;
+        if (cfg.log_compression_enable) {
+            const comp_config = compression.CompressionConfig{
+                .enable_checksums = cfg.compression_enable_checksums,
+                .compression_level = cfg.compression_level,
+                .rle_min_run_length = cfg.compression_rle_min_run_length,
+            };
+            compression_engine = try allocator.create(compression.CompressionEngine);
+            compression_engine.?.* = compression.CompressionEngine.init(allocator, comp_config);
+        }
+
         return AppendLog{
             .allocator = allocator,
             .file = file,
@@ -67,6 +81,7 @@ pub const AppendLog = struct {
             .entry_count = entry_count,
             .log_path = try allocator.dupe(u8, log_path),
             .config = cfg,
+            .compression_engine = compression_engine,
         };
     }
 
@@ -76,6 +91,11 @@ pub const AppendLog = struct {
         }
         self.file.close();
         self.allocator.free(self.log_path);
+        
+        if (self.compression_engine) |engine| {
+            engine.deinit();
+            self.allocator.destroy(engine);
+        }
     }
 
     /// Append a single log entry (thread-safe, deterministic)
@@ -229,6 +249,22 @@ pub const AppendLog = struct {
     fn growFile(self: *AppendLog) !void {
         const new_size = @min(self.current_size * 2, self.max_size);
         if (new_size <= self.current_size) {
+            // Before failing with LogFull, try automatic compaction
+            const size_threshold = @as(f32, @floatFromInt(self.current_size)) * self.config.log_compaction_threshold;
+            const used_size = self.entry_count * ENTRY_SIZE;
+            
+            if (@as(f32, @floatFromInt(used_size)) >= size_threshold) {
+                // Try compaction to free up space
+                _ = try self.compactLog(self.config.log_compaction_keep_recent);
+                
+                // After compaction, try growing again if needed
+                const new_used_size = self.entry_count * ENTRY_SIZE;
+                if (new_used_size < self.current_size / 2) {
+                    // Successfully compacted, we have space now
+                    return;
+                }
+            }
+            
             return error.LogFull;
         }
 
@@ -251,6 +287,80 @@ pub const AppendLog = struct {
         );
 
         self.current_size = new_size;
+    }
+
+    /// Compact log by keeping only the most recent N entries
+    /// This significantly reduces log size by removing old entries
+    pub fn compactLog(self: *AppendLog, keep_recent_count: u64) !u64 {
+        if (keep_recent_count >= self.entry_count) {
+            return self.entry_count; // Nothing to compact
+        }
+        
+        const entries_to_remove = self.entry_count - keep_recent_count;
+        const start_index = entries_to_remove;
+        
+        // Read the entries we want to keep
+        var entries_to_keep = std.ArrayList(types.LogEntry).init(self.allocator);
+        defer entries_to_keep.deinit();
+        
+        var i: u64 = start_index;
+        while (i < self.entry_count) : (i += 1) {
+            if (try self.read(i)) |entry| {
+                try entries_to_keep.append(entry);
+            }
+        }
+        
+        // Directly clear the log without calling growFile (to break circular dependency)
+        if (self.mmap) |mmap| {
+            std.posix.munmap(mmap);
+            self.mmap = null;
+        }
+        
+        // Calculate required size for the entries we want to keep
+        const required_size = entries_to_keep.items.len * ENTRY_SIZE;
+        const new_file_size = @max(self.config.log_initial_size, required_size * 2); // Give some buffer
+        
+        // Truncate file to 0 and reset to adequate size
+        try self.file.setEndPos(0);
+        try self.file.setEndPos(new_file_size);
+        
+        // Remap with adequate size
+        self.mmap = try std.posix.mmap(
+            null,
+            new_file_size,
+            std.posix.PROT.READ | std.posix.PROT.WRITE,
+            std.posix.MAP{ .TYPE = .SHARED },
+            self.file.handle,
+            0,
+        );
+        
+        // Zero out the memory to prevent reading stale data
+        if (self.mmap) |mmap| {
+            @memset(mmap[0..new_file_size], 0);
+        }
+        
+        self.current_size = new_file_size;
+        self.entry_count = 0;
+        
+        // Write back only the recent entries (this won't call growFile since we have enough space)
+        if (entries_to_keep.items.len > 0) {
+            // Directly write the entries without going through appendBatch to avoid growFile
+            const write_offset = self.entry_count * ENTRY_SIZE;
+            if (self.mmap) |mmap| {
+                for (entries_to_keep.items, 0..) |entry, idx| {
+                    const offset = write_offset + (idx * ENTRY_SIZE);
+                    const entry_bytes = std.mem.asBytes(&entry);
+                    @memcpy(mmap[offset..offset + ENTRY_SIZE], entry_bytes);
+                }
+                
+                // Force write to disk for durability
+                const aligned_mmap: []align(std.heap.page_size_min) u8 = @alignCast(mmap);
+                try std.posix.msync(aligned_mmap, std.posix.MSF.SYNC);
+            }
+            self.entry_count += entries_to_keep.items.len;
+        }
+        
+        return entries_to_remove;
     }
 };
 

@@ -85,7 +85,11 @@ pub const MemoryManager = struct {
         if (options.session_id) |sid| memory.session_id = sid;
         if (options.user_id) |uid| memory.user_id = uid;
         
-        // Store full content separately (Node label is limited to 32 bytes)
+        // Store full content in the log for persistence (Node label is limited to 32 bytes)
+        const content_log_entry = types.LogEntry.initMemoryContent(memory_id, content);
+        try self.memora.append_log.append(content_log_entry);
+        
+        // Also store in in-memory cache for fast access
         const content_copy = try self.allocator.dupe(u8, content);
         try self.memory_content.put(memory_id, content_copy);
         
@@ -161,11 +165,22 @@ pub const MemoryManager = struct {
         // Get the node from underlying database
         const node = self.memora.graph_index.getNode(memory_id) orelse return null;
         
-        // Get the full content
-        const content = self.memory_content.get(memory_id) orelse return null;
+        // Get the full content from cache or load from log
+        var content = self.memory_content.get(memory_id);
+        if (content == null) {
+            // Content not in cache, try to load from log
+            if (try self.loadContentFromLog(memory_id)) |log_content| {
+                // Cache the loaded content
+                const content_copy = try self.allocator.dupe(u8, log_content);
+                try self.memory_content.put(memory_id, content_copy);
+                content = self.memory_content.get(memory_id);
+            }
+        }
+        
+        const final_content = content orelse return null;
         
         // Reconstruct memory
-        var memory = Memory.fromNode(node, content);
+        var memory = Memory.fromNode(node, final_content);
         
         // Update access tracking
         memory.markAccessed();
@@ -316,14 +331,14 @@ pub const MemoryManager = struct {
     // Private helper methods
     
     fn performSemanticSearch(self: *Self, result: *MemoryQueryResult, query_text: []const u8, query: MemoryQuery) !void {
-        _ = query_text; // TODO: Use for actual semantic search
+        // Generate embedding for the query text
+        const query_embedding = try self.generateEmbedding(query_text);
         
-        // For now, perform a simple search by getting all memories
-        // In the future, this would use the query_text to generate embeddings
-        // and find semantically similar memories
+        // Create temporary vector for similarity search
+        const query_vector = types.Vector.init(0, &query_embedding); // ID 0 for query vector
         
-        // Find similar vectors (placeholder implementation)
-        const similar_results = try self.memora.querySimilar(0, @intCast(query.limit));
+        // Find similar vectors using the query vector
+        const similar_results = try self.memora.vector_search.querySimilarByVector(&self.memora.vector_index, query_vector, @intCast(query.limit));
         defer similar_results.deinit();
         
         // Convert similarity results to memories
@@ -454,6 +469,24 @@ pub const MemoryManager = struct {
         }
     }
     
+    /// Load memory content from log by scanning for memory_content entries
+    fn loadContentFromLog(self: *Self, memory_id: u64) !?[]const u8 {
+        var iter = self.memora.append_log.iterator();
+        
+        // Scan through log entries to find the content for this memory ID
+        while (iter.next()) |entry| {
+            if (entry.getEntryType() == .memory_content) {
+                if (entry.asMemoryContent()) |mem_content| {
+                    if (mem_content.memory_id == memory_id) {
+                        return mem_content.content;
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+
     fn generateEmbedding(self: *Self, content: []const u8) !([128]f32) {
         _ = self;
         

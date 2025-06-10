@@ -115,6 +115,7 @@ pub const LogEntryType = enum(u8) {
     node = 0,
     edge = 1,
     vector = 2,
+    memory_content = 3,
 };
 
 pub const LogEntry = struct {
@@ -155,6 +156,19 @@ pub const LogEntry = struct {
         return entry;
     }
 
+    pub fn initMemoryContent(memory_id: u64, content: []const u8) LogEntry {
+        var entry = LogEntry{
+            .entry_type = @intFromEnum(LogEntryType.memory_content),
+            .timestamp = @intCast(std.time.timestamp()),
+            .data = [_]u8{0} ** 520,
+        };
+        // Store memory ID in first 8 bytes, then content
+        std.mem.writeInt(u64, entry.data[0..8], memory_id, .little);
+        const content_len = @min(content.len, 512); // 520 - 8 bytes for memory ID
+        @memcpy(entry.data[8..8 + content_len], content[0..content_len]);
+        return entry;
+    }
+
     pub fn getEntryType(self: *const LogEntry) LogEntryType {
         return @enumFromInt(self.entry_type);
     }
@@ -175,6 +189,23 @@ pub const LogEntry = struct {
     pub fn asVector(self: *const LogEntry) ?Vector {
         if (self.getEntryType() != .vector) return null;
         return std.mem.bytesToValue(Vector, self.data[0..@sizeOf(Vector)]);
+    }
+
+    pub fn asMemoryContent(self: *const LogEntry) ?struct { memory_id: u64, content: []const u8 } {
+        if (self.getEntryType() != .memory_content) return null;
+        const memory_id = std.mem.readInt(u64, self.data[0..8], .little);
+        
+        // Find the end of the content (null-terminated)
+        var content_len: usize = 0;
+        for (self.data[8..]) |byte| {
+            if (byte == 0) break;
+            content_len += 1;
+        }
+        
+        return .{
+            .memory_id = memory_id,
+            .content = self.data[8..8 + content_len],
+        };
     }
 };
 

@@ -455,6 +455,26 @@ pub const Memora = struct {
         return result;
     }
 
+    /// Compact the append log by keeping only recent entries
+    /// This significantly reduces log file size by removing old entries
+    /// Returns the number of entries removed
+    pub fn compactLog(self: *Memora, keep_recent_count: u64) !u64 {
+        const start_time = std.time.nanoTimestamp();
+        
+        // Create a snapshot first to preserve all data
+        var snapshot_info = try self.createSnapshot();
+        defer snapshot_info.deinit();
+        
+        // Compact the log - this will clear the log and rebuild indexes from the snapshot
+        const entries_removed = try self.append_log.compactLog(keep_recent_count);
+        
+        // Record metrics
+        const duration_us = @divTrunc(std.time.nanoTimestamp() - start_time, 1000);
+        self.metrics.recordLogCompaction(@intCast(duration_us), entries_removed);
+        
+        return entries_removed;
+    }
+
     // Private methods
 
     fn autoSnapshot(self: *Memora) !void {
@@ -464,6 +484,11 @@ pub const Memora = struct {
             if (current_entries > 0 and current_entries % self.snapshot_manager.config.auto_interval == 0) {
                 var snapshot_info = try self.createSnapshot();
                 defer snapshot_info.deinit();
+                
+                // Clear the log after successful snapshot if configured  
+                if (self.append_log.config.snapshot_auto_clear_log) {
+                    try self.append_log.clear();
+                }
                 
                 // Auto cleanup if enabled
                 if (self.snapshot_manager.config.cleanup_auto_enable) {
@@ -538,6 +563,10 @@ pub const Memora = struct {
                     if (entry.asVector()) |vec| {
                         try self.vector_index.addVector(vec);
                     }
+                },
+                .memory_content => {
+                    // Memory content entries are handled by MemoryManager during initialization
+                    // We don't need to do anything here since content will be loaded on-demand
                 },
             }
         }
@@ -634,12 +663,9 @@ pub const Memora = struct {
     
     /// Replay log entries that occurred since last persistent index save
     fn replayLogSinceLastIndexSave(self: *Memora) !void {
-        // Get timestamp of last persistent index update
-        const index_stats = try self.persistent_index_manager.getStats();
-        _ = index_stats; // For now, replay all log entries
-        
-        // TODO: Implement timestamp-based log replay
-        // For now, assume persistent indexes are current
+        // For now, replay all log entries to ensure consistency
+        // TODO: Implement timestamp-based log replay for optimization
+        try self.replayFromLog();
     }
     
     /// Save current in-memory indexes to persistent storage

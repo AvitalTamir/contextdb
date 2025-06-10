@@ -6,6 +6,9 @@ pub const Config = struct {
     // Log configuration
     log_initial_size: usize = 1024 * 1024, // 1MB default
     log_max_size: usize = 1024 * 1024 * 1024, // 1GB default
+    log_compression_enable: bool = false, // Enable log compression (reduces size but adds CPU overhead)
+    log_compaction_threshold: f32 = 0.75, // Compact log when it reaches this fraction of max size
+    log_compaction_keep_recent: u32 = 100000, // Keep this many recent entries during compaction
     
     // Cache configuration
     cache_stats_alpha: f32 = 0.1, // Exponential moving average smoothing factor
@@ -82,7 +85,8 @@ pub const Config = struct {
     compression_min_ratio_threshold: f32 = 1.2, // Minimum compression ratio to use compression
     
     // Snapshot system configuration
-    snapshot_auto_interval: u32 = 0, // Create snapshot every N operations (0 = disabled)
+    snapshot_auto_interval: u32 = 50000, // Create snapshot every N operations (0 = disabled)
+    snapshot_auto_clear_log: bool = true, // Clear log after creating successful snapshot
     snapshot_max_metadata_size_mb: u32 = 10, // Maximum size for snapshot metadata files (MB)
     snapshot_compression_enable: bool = true, // Enable snapshot compression
     snapshot_cleanup_keep_count: u32 = 10, // Keep this many snapshots during cleanup
@@ -176,6 +180,12 @@ pub const Config = struct {
             self.log_initial_size = try parseSize(value);
         } else if (std.mem.eql(u8, key, "log_max_size")) {
             self.log_max_size = try parseSize(value);
+        } else if (std.mem.eql(u8, key, "log_compression_enable")) {
+            self.log_compression_enable = try parseBool(value);
+        } else if (std.mem.eql(u8, key, "log_compaction_threshold")) {
+            self.log_compaction_threshold = try parseFloat(value);
+        } else if (std.mem.eql(u8, key, "log_compaction_keep_recent")) {
+            self.log_compaction_keep_recent = try parseInt(u32, value);
         }
         // Cache configuration
         else if (std.mem.eql(u8, key, "cache_stats_alpha")) {
@@ -310,6 +320,8 @@ pub const Config = struct {
         // Snapshot system configuration
         else if (std.mem.eql(u8, key, "snapshot_auto_interval")) {
             self.snapshot_auto_interval = try parseInt(u32, value);
+        } else if (std.mem.eql(u8, key, "snapshot_auto_clear_log")) {
+            self.snapshot_auto_clear_log = try parseBool(value);
         } else if (std.mem.eql(u8, key, "snapshot_max_metadata_size_mb")) {
             self.snapshot_max_metadata_size_mb = try parseInt(u32, value);
         } else if (std.mem.eql(u8, key, "snapshot_compression_enable")) {
@@ -457,6 +469,9 @@ pub const Config = struct {
         try writer.print("# Log settings\n", .{});
         try writer.print("log_initial_size = {}\n", .{self.log_initial_size});
         try writer.print("log_max_size = {}\n", .{self.log_max_size});
+        try writer.print("log_compression_enable = {}\n", .{self.log_compression_enable});
+        try writer.print("log_compaction_threshold = {}\n", .{self.log_compaction_threshold});
+        try writer.print("log_compaction_keep_recent = {}\n", .{self.log_compaction_keep_recent});
         try writer.print("\n", .{});
         try writer.print("# Cache settings\n", .{});
         try writer.print("cache_stats_alpha = {}\n", .{self.cache_stats_alpha});
@@ -534,6 +549,7 @@ pub const Config = struct {
         try writer.print("\n", .{});
         try writer.print("# Snapshot system configuration\n", .{});
         try writer.print("snapshot_auto_interval = {}\n", .{self.snapshot_auto_interval});
+        try writer.print("snapshot_auto_clear_log = {}\n", .{self.snapshot_auto_clear_log});
         try writer.print("snapshot_max_metadata_size_mb = {}\n", .{self.snapshot_max_metadata_size_mb});
         try writer.print("snapshot_compression_enable = {}\n", .{self.snapshot_compression_enable});
         try writer.print("snapshot_cleanup_keep_count = {}\n", .{self.snapshot_cleanup_keep_count});

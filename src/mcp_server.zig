@@ -764,7 +764,78 @@ pub const McpServer = struct {
             try response_text.appendSlice(user_msg);
         }
         
-        try response_text.appendSlice("\nMemory is now available for semantic search and relationship exploration!");
+        // Extract and create concept relationships for the new memory
+        const concepts = try self.extractConcepts(content);
+        defer {
+            for (concepts.items) |concept| {
+                self.allocator.free(concept);
+            }
+            concepts.deinit();
+        }
+        
+        var created_concepts = std.ArrayList(u64).init(self.allocator);
+        defer created_concepts.deinit();
+        
+        for (concepts.items) |concept| {
+            const concept_id = self.generateConceptId(concept);
+            
+            // Create concept node if it doesn't exist
+            if (self.db.graph_index.getNode(concept_id) == null) {
+                const concept_node = types.Node.init(concept_id, concept);
+                self.db.insertNode(concept_node) catch |err| {
+                    std.debug.print("Warning: Failed to create concept node '{s}': {any}\n", .{ concept, err });
+                    continue;
+                };
+            }
+            
+            try created_concepts.append(concept_id);
+            
+            // Create semantic relationship from memory to concept
+            const memory_to_concept_edge = types.Edge.init(memory_id, concept_id, types.EdgeKind.related);
+            self.db.insertEdge(memory_to_concept_edge) catch |err| {
+                std.debug.print("Warning: Failed to create memory->concept edge: {any}\n", .{err});
+            };
+        }
+        
+        // Create connections between related concepts
+        if (created_concepts.items.len > 1) {
+            for (created_concepts.items, 0..) |concept1_id, i| {
+                for (created_concepts.items[i+1..]) |concept2_id| {
+                    const concept_edge1 = types.Edge.init(concept1_id, concept2_id, types.EdgeKind.similar_to);
+                    const concept_edge2 = types.Edge.init(concept2_id, concept1_id, types.EdgeKind.similar_to);
+                    
+                    self.db.insertEdge(concept_edge1) catch |err| {
+                        std.debug.print("Warning: Failed to create concept relationship: {any}\n", .{err});
+                    };
+                    self.db.insertEdge(concept_edge2) catch |err| {
+                        std.debug.print("Warning: Failed to create concept relationship: {any}\n", .{err});
+                    };
+                }
+            }
+        }
+        
+        // Add concept information to response
+        if (created_concepts.items.len > 0) {
+            const concepts_info = try std.fmt.allocPrint(self.allocator, 
+                "\nExtracted {} concepts: ", .{created_concepts.items.len});
+            defer self.allocator.free(concepts_info);
+            try response_text.appendSlice(concepts_info);
+            
+            for (concepts.items, 0..) |concept, i| {
+                if (i > 0) try response_text.appendSlice(", ");
+                try response_text.appendSlice("\"");
+                try response_text.appendSlice(concept);
+                try response_text.appendSlice("\"");
+            }
+            
+            const relationships_count = created_concepts.items.len + (created_concepts.items.len * (created_concepts.items.len - 1) / 2);
+            const relationships_info = try std.fmt.allocPrint(self.allocator, 
+                "\nCreated {} semantic relationships", .{relationships_count});
+            defer self.allocator.free(relationships_info);
+            try response_text.appendSlice(relationships_info);
+        }
+        
+        try response_text.appendSlice("\n\nMemory is now available for semantic search and relationship exploration!");
         
         return self.createSuccessResponse(id, .{
             .content = [_]struct { 
@@ -1242,8 +1313,14 @@ pub const McpServer = struct {
             const memory_id: u64 = @intCast(mem_id.integer);
             
             if (self.db.graph_index.getNode(memory_id)) |node| {
+                // Get full memory content from MemoryManager instead of just the label
+                const memory_content = if (try self.memory_manager.getMemory(memory_id)) |memory| 
+                    memory.getContentAsString() 
+                else 
+                    node.getLabelAsString(); // Fallback to label if memory retrieval fails
+                
                 const memory_text = try std.fmt.allocPrint(self.allocator, 
-                    "Memory {}: \"{s}\"\n\n", .{ memory_id, node.getLabelAsString() });
+                    "Memory {}: \"{s}\"\n\n", .{ memory_id, memory_content });
                 defer self.allocator.free(memory_text);
                 try content_list.appendSlice(memory_text);
                 
@@ -1283,12 +1360,19 @@ pub const McpServer = struct {
                 if (found_count >= limit) break;
                 
                 const node = entry.value_ptr.*;
-                const node_label = node.getLabelAsString();
+                // Check if this is a memory node (not a concept node)
+                if (node.id >= 0x8000000000000000) continue;
                 
-                if (std.mem.indexOf(u8, node_label, query_str) != null) {
+                // Get full memory content from MemoryManager
+                const memory_content = if (try self.memory_manager.getMemory(node.id)) |memory| 
+                    memory.getContentAsString() 
+                else 
+                    node.getLabelAsString(); // Fallback to label if memory retrieval fails
+                
+                if (std.mem.indexOf(u8, memory_content, query_str) != null) {
                     found_count += 1;
                     const memory_text = try std.fmt.allocPrint(self.allocator, 
-                        "{}. Memory {}: \"{s}\"\n", .{ found_count, node.id, node_label });
+                        "{}. Memory {}: \"{s}\"\n", .{ found_count, node.id, memory_content });
                     defer self.allocator.free(memory_text);
                     try content_list.appendSlice(memory_text);
                 }
@@ -1353,9 +1437,16 @@ pub const McpServer = struct {
                             // Check if this is a memory node (not another concept)
                             if (edge.from < 0x8000000000000000) { // Memory nodes have lower IDs
                                 found_count += 1;
+                                
+                                // Get full memory content from MemoryManager
+                                const memory_content = if (try self.memory_manager.getMemory(memory_node.id)) |memory| 
+                                    memory.getContentAsString() 
+                                else 
+                                    memory_node.getLabelAsString(); // Fallback to label if memory retrieval fails
+                                
                                 const memory_text = try std.fmt.allocPrint(self.allocator, 
                                     "{}. Memory {}: \"{s}\"\n", 
-                                    .{ found_count, memory_node.id, memory_node.getLabelAsString() });
+                                    .{ found_count, memory_node.id, memory_content });
                                 defer self.allocator.free(memory_text);
                                 try content_list.appendSlice(memory_text);
                             }
@@ -1434,9 +1525,15 @@ pub const McpServer = struct {
             try content_list.appendSlice("No memories found in the database.");
         } else {
             for (memory_nodes.items[0..actual_count], 0..) |node, i| {
+                // Get full memory content from MemoryManager instead of just the label
+                const memory_content = if (try self.memory_manager.getMemory(node.id)) |memory| 
+                    memory.getContentAsString() 
+                else 
+                    node.getLabelAsString(); // Fallback to label if memory retrieval fails
+                
                 const memory_text = try std.fmt.allocPrint(self.allocator, 
                     "{}. Memory {}: \"{s}\"\n", 
-                    .{ i + 1, node.id, node.getLabelAsString() });
+                    .{ i + 1, node.id, memory_content });
                 defer self.allocator.free(memory_text);
                 try content_list.appendSlice(memory_text);
             }
