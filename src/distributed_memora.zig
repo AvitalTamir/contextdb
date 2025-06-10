@@ -3,6 +3,9 @@ const memora = @import("main.zig");
 const raft = @import("raft.zig");
 const raft_network = @import("raft_network.zig");
 const config = @import("config.zig");
+const partitioning = @import("partitioning.zig");
+const recovery = @import("recovery.zig");
+const split_brain_protection = @import("split_brain_protection.zig");
 const testing = std.testing;
 
 /// Distributed Memora with Raft consensus
@@ -40,6 +43,21 @@ pub const DistributedConfig = struct {
     read_quorum: u8 = 2, // Minimum nodes for read operations
     write_quorum: u8 = 2, // Minimum nodes for write operations
     
+    // Data partitioning settings
+    enable_data_partitioning: bool = true,
+    virtual_nodes_per_node: u16 = 150,
+    rebalance_threshold: f32 = 0.15,
+    
+    // Failover and recovery settings
+    enable_automatic_failover: bool = true,
+    leader_failure_timeout_ms: u32 = 5000,
+    enable_fast_recovery: bool = true,
+    
+    // Split-brain protection settings
+    enable_split_brain_protection: bool = true,
+    minimum_quorum_size: u8 = 2,
+    conflict_resolution_strategy: split_brain_protection.ConflictConfig.ConflictResolutionStrategy = .vector_clock,
+    
     pub const ClusterNode = struct {
         id: u64,
         address: []const u8,
@@ -59,6 +77,15 @@ pub const DistributedMemora = struct {
     // Raft consensus
     raft_node: raft_network.NetworkedRaftNode,
     
+    // Data partitioning
+    partition_manager: ?partitioning.DataPartitionManager = null,
+    
+    // Failover and recovery
+    recovery_manager: ?recovery.FailoverRecoveryManager = null,
+    
+    // Split-brain protection
+    split_brain_protection: ?split_brain_protection.SplitBrainProtection = null,
+    
     // Cluster state
     is_leader: bool = false,
     leader_id: ?u64 = null,
@@ -67,6 +94,8 @@ pub const DistributedMemora = struct {
     // Performance metrics
     operation_count: u64 = 0,
     replication_latency_ms: u64 = 0,
+    total_failovers: u64 = 0,
+    total_recoveries: u64 = 0,
     
     pub fn init(allocator: std.mem.Allocator, distributed_config: DistributedConfig) !DistributedMemora {
         // Initialize Memora engine
@@ -84,15 +113,84 @@ pub const DistributedMemora = struct {
             distributed_config.raft_port
         );
         
-        return DistributedMemora{
+        var distributed_memora = DistributedMemora{
             .allocator = allocator,
             .config = distributed_config,
             .memora = memora_engine,
             .raft_node = raft_node,
         };
+        
+        // Initialize data partitioning if enabled
+        if (distributed_config.enable_data_partitioning) {
+            const partition_config = partitioning.PartitionConfig{
+                .hash_ring_config = .{
+                    .virtual_nodes_per_node = distributed_config.virtual_nodes_per_node,
+                    .replication_factor = distributed_config.replication_factor,
+                    .hash_function = .fnv1a,
+                },
+                .rebalance_threshold = distributed_config.rebalance_threshold,
+                .enable_partition_validation = true,
+            };
+            distributed_memora.partition_manager = partitioning.DataPartitionManager.init(allocator, partition_config);
+        }
+        
+        // Initialize failover and recovery if enabled
+        if (distributed_config.enable_automatic_failover) {
+            const recovery_config = recovery.RecoveryConfig{
+                .leader_failure_timeout_ms = distributed_config.leader_failure_timeout_ms,
+                .enable_fast_recovery = distributed_config.enable_fast_recovery,
+                .require_majority_for_recovery = distributed_config.enable_split_brain_protection,
+                .enable_automatic_repair = true,
+            };
+            distributed_memora.recovery_manager = recovery.FailoverRecoveryManager.init(allocator, recovery_config);
+            
+            // Connect partition manager to recovery manager
+            if (distributed_memora.partition_manager) |*pm| {
+                distributed_memora.recovery_manager.?.setPartitionManager(pm);
+            }
+        }
+        
+        // Initialize split-brain protection if enabled
+        if (distributed_config.enable_split_brain_protection) {
+            const conflict_config = split_brain_protection.ConflictConfig{
+                .enable_split_brain_protection = true,
+                .minimum_quorum_size = distributed_config.minimum_quorum_size,
+                .default_resolution_strategy = distributed_config.conflict_resolution_strategy,
+                .use_vector_clocks = true,
+                .enable_automatic_merge = true,
+            };
+            distributed_memora.split_brain_protection = split_brain_protection.SplitBrainProtection.init(
+                allocator, 
+                distributed_config.node_id, 
+                conflict_config
+            );
+        }
+        
+        // Add this node to partition manager
+        if (distributed_memora.partition_manager) |*pm| {
+            try pm.addNode(distributed_config.node_id);
+        }
+        
+        std.debug.print("Initialized DistributedMemora node {} with partitioning: {}, recovery: {}, split-brain protection: {}\n", 
+            .{ distributed_config.node_id, distributed_config.enable_data_partitioning, 
+               distributed_config.enable_automatic_failover, distributed_config.enable_split_brain_protection });
+        
+        return distributed_memora;
     }
     
     pub fn deinit(self: *DistributedMemora) void {
+        // Clean up distributed systems
+        if (self.partition_manager) |*pm| {
+            pm.deinit();
+        }
+        if (self.recovery_manager) |*rm| {
+            rm.deinit();
+        }
+        if (self.split_brain_protection) |*sbp| {
+            sbp.deinit();
+        }
+        
+        // Clean up core systems
         self.raft_node.deinit();
         self.memora.deinit();
     }
@@ -113,6 +211,31 @@ pub const DistributedMemora = struct {
     
     /// Insert a node (distributed operation)
     pub fn insertNode(self: *DistributedMemora, node: memora.types.Node) !void {
+        // Check if this node should handle this data using partitioning
+        if (self.partition_manager) |*pm| {
+            var key_buf: [32]u8 = undefined;
+            const key = try std.fmt.bufPrint(&key_buf, "node_{}", .{node.id});
+            
+            const owns_data = try pm.ownsData(self.config.node_id, key, .node);
+            if (!owns_data) {
+                // Route to appropriate node
+                const storage_nodes = try pm.routeWriteOperation(key, .node);
+                defer self.allocator.free(storage_nodes);
+                
+                std.debug.print("Routing node {} write to nodes: {any}\n", .{ node.id, storage_nodes });
+                // In a real implementation, forward to appropriate nodes
+                return error.RoutedToOtherNodes;
+            }
+        }
+        
+        // Check split-brain protection
+        if (self.split_brain_protection) |*sbp| {
+            const partition_status = sbp.getPartitionStatus();
+            if (!partition_status.has_quorum) {
+                return error.InsufficientQuorum;
+            }
+        }
+        
         const operation = StateMachineOperation{
             .operation_type = .insert_node,
             .data_size = @sizeOf(memora.types.Node),
@@ -323,6 +446,217 @@ pub const DistributedMemora = struct {
         // Simplified quorum check - in production, check actual node availability
         return self.is_leader or self.leader_id != null;
     }
+    
+    /// Get comprehensive cluster health information
+    pub fn getClusterHealth(self: *DistributedMemora) ClusterHealthInfo {
+        var health_info = ClusterHealthInfo{
+            .node_id = self.config.node_id,
+            .is_leader = self.is_leader,
+            .leader_id = self.leader_id,
+            .operation_count = self.operation_count,
+            .replication_latency_ms = self.replication_latency_ms,
+            .total_failovers = self.total_failovers,
+            .total_recoveries = self.total_recoveries,
+            .partition_status = null,
+            .recovery_status = null,
+            .split_brain_status = null,
+        };
+        
+        // Get partition health if enabled
+        if (self.partition_manager) |*pm| {
+            const partition_stats = pm.getPartitionStats() catch null;
+            if (partition_stats) |stats| {
+                health_info.partition_status = PartitionHealthStatus{
+                    .total_partitions = stats.total_partitions,
+                    .active_migrations = stats.active_migrations,
+                    .rebalance_operations = stats.rebalance_operations,
+                    .last_rebalance_time = stats.last_rebalance_time,
+                };
+            }
+        }
+        
+        // Get recovery health if enabled
+        if (self.recovery_manager) |*rm| {
+            const cluster_health = rm.getClusterHealth();
+            health_info.recovery_status = RecoveryHealthStatus{
+                .total_nodes = cluster_health.total_nodes,
+                .healthy_nodes = cluster_health.healthy_nodes,
+                .failed_nodes = cluster_health.failed_nodes,
+                .recovering_nodes = cluster_health.recovering_nodes,
+                .active_recoveries = cluster_health.active_recoveries,
+                .total_failovers = cluster_health.total_failovers,
+                .total_recoveries = cluster_health.total_recoveries,
+            };
+        }
+        
+        // Get split-brain protection status if enabled
+        if (self.split_brain_protection) |*sbp| {
+            const partition_status = sbp.getPartitionStatus();
+            health_info.split_brain_status = SplitBrainHealthStatus{
+                .has_active_partitions = partition_status.has_active_partitions,
+                .active_partition_count = partition_status.active_partition_count,
+                .in_majority_partition = partition_status.in_majority_partition,
+                .has_quorum = partition_status.has_quorum,
+                .reachable_nodes = partition_status.reachable_nodes,
+                .total_conflicts = partition_status.total_conflicts,
+                .unresolved_conflicts = partition_status.unresolved_conflicts,
+            };
+        }
+        
+        return health_info;
+    }
+    
+    /// Handle node join event
+    pub fn handleNodeJoin(self: *DistributedMemora, node_id: u64) !void {
+        std.debug.print("Node {} joining cluster\n", .{node_id});
+        
+        // Add to partition manager
+        if (self.partition_manager) |*pm| {
+            try pm.addNode(node_id);
+        }
+        
+        // Update recovery manager
+        if (self.recovery_manager) |*rm| {
+            try rm.updateNodeHealth(node_id, .follower, 0);
+        }
+        
+        // Update split-brain protection
+        if (self.split_brain_protection) |*sbp| {
+            try sbp.updateNodeStatus(node_id, true);
+        }
+    }
+    
+    /// Handle node leave event
+    pub fn handleNodeLeave(self: *DistributedMemora, node_id: u64) !void {
+        std.debug.print("Node {} leaving cluster\n", .{node_id});
+        
+        // Update recovery manager first (for data migration)
+        if (self.recovery_manager) |*rm| {
+            try rm.markNodeFailed(node_id);
+            self.total_failovers += 1;
+        }
+        
+        // Update split-brain protection
+        if (self.split_brain_protection) |*sbp| {
+            try sbp.updateNodeStatus(node_id, false);
+        }
+        
+        // Remove from partition manager (after data migration)
+        if (self.partition_manager) |*pm| {
+            try pm.removeNode(node_id);
+        }
+    }
+    
+    /// Handle leadership change
+    pub fn handleLeadershipChange(self: *DistributedMemora, new_leader_id: u64) !void {
+        const old_leader = self.leader_id;
+        self.leader_id = new_leader_id;
+        self.is_leader = (new_leader_id == self.config.node_id);
+        
+        std.debug.print("Leadership changed: {} -> {}\n", .{ old_leader orelse 0, new_leader_id });
+        
+        // Update recovery manager
+        if (self.recovery_manager) |*rm| {
+            try rm.updateNodeHealth(new_leader_id, .leader, 0);
+            
+            if (old_leader) |old_id| {
+                if (old_id != new_leader_id) {
+                    try rm.updateNodeHealth(old_id, .follower, 0);
+                    self.total_failovers += 1;
+                }
+            }
+        }
+    }
+    
+    /// Perform periodic maintenance tasks
+    pub fn performMaintenance(self: *DistributedMemora) !void {
+        // Check for needed rebalancing
+        if (self.partition_manager) |*pm| {
+            // This would normally be triggered by load imbalance detection
+            // For now, just update statistics
+            _ = pm.getPartitionStats() catch {};
+        }
+        
+        // Clean up completed recovery operations
+        if (self.recovery_manager) |*rm| {
+            const active_recoveries = try rm.getActiveRecoveries();
+            defer self.allocator.free(active_recoveries);
+            
+            for (active_recoveries) |recovery_op| {
+                if (recovery_op.status == .completed) {
+                    self.total_recoveries += 1;
+                }
+            }
+        }
+        
+        // Check partition status
+        if (self.split_brain_protection) |*sbp| {
+            try sbp.detectPartition();
+        }
+    }
+};
+
+/// Cluster health information
+pub const ClusterHealthInfo = struct {
+    node_id: u64,
+    is_leader: bool,
+    leader_id: ?u64,
+    operation_count: u64,
+    replication_latency_ms: u64,
+    total_failovers: u64,
+    total_recoveries: u64,
+    partition_status: ?PartitionHealthStatus,
+    recovery_status: ?RecoveryHealthStatus,
+    split_brain_status: ?SplitBrainHealthStatus,
+    
+    pub fn isHealthy(self: *const ClusterHealthInfo) bool {
+        // Basic health check
+        var healthy = true;
+        
+        if (self.partition_status) |ps| {
+            healthy = healthy and (ps.active_migrations == 0);
+        }
+        
+        if (self.recovery_status) |rs| {
+            healthy = healthy and (rs.failed_nodes == 0) and (rs.active_recoveries == 0);
+        }
+        
+        if (self.split_brain_status) |sbs| {
+            healthy = healthy and !sbs.has_active_partitions and sbs.has_quorum and (sbs.unresolved_conflicts == 0);
+        }
+        
+        return healthy;
+    }
+};
+
+/// Partition health status
+pub const PartitionHealthStatus = struct {
+    total_partitions: u32,
+    active_migrations: u32,
+    rebalance_operations: u64,
+    last_rebalance_time: u64,
+};
+
+/// Recovery health status
+pub const RecoveryHealthStatus = struct {
+    total_nodes: u32,
+    healthy_nodes: u32,
+    failed_nodes: u32,
+    recovering_nodes: u32,
+    active_recoveries: u32,
+    total_failovers: u64,
+    total_recoveries: u64,
+};
+
+/// Split-brain protection health status
+pub const SplitBrainHealthStatus = struct {
+    has_active_partitions: bool,
+    active_partition_count: u32,
+    in_majority_partition: bool,
+    has_quorum: bool,
+    reachable_nodes: u32,
+    total_conflicts: u32,
+    unresolved_conflicts: u32,
 };
 
 /// Cluster status information

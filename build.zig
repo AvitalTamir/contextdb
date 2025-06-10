@@ -195,6 +195,17 @@ pub fn build(b: *std.Build) void {
     const test_mcp_run = b.addRunArtifact(test_mcp_exe);
     test_mcp_step.dependOn(&test_mcp_run.step);
 
+    // Data partitioning tests
+    const test_partitioning_step = b.step("test-partitioning", "Run data partitioning tests");
+    const test_partitioning_exe = b.addTest(.{
+        .root_source_file = b.path("test/test_partitioning.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_partitioning_exe.root_module.addImport("memora", memora_module);
+    const test_partitioning_run = b.addRunArtifact(test_partitioning_exe);
+    test_partitioning_step.dependOn(&test_partitioning_run.step);
+
     // Fuzzing campaign runner
     const fuzz_runner_step = b.step("fuzz", "Run Memora fuzzing campaigns");
     const fuzz_runner_exe = b.addExecutable(.{
@@ -274,6 +285,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&test_http_api_run.step);
     test_all_step.dependOn(&test_fuzzing_run.step);
     test_all_step.dependOn(&test_mcp_run.step);
+    test_all_step.dependOn(&test_partitioning_run.step);
 
     // Comprehensive test suite including fuzzing
     const test_comprehensive_step = b.step("test-comprehensive", "Run all tests including fuzzing");

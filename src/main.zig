@@ -23,6 +23,10 @@ pub const fuzzing = @import("fuzzing.zig");
 pub const mcp_server = @import("mcp_server.zig");
 pub const gossip = @import("gossip.zig");
 pub const node_discovery = @import("node_discovery.zig");
+pub const partitioning = @import("partitioning.zig");
+pub const consistent_hashing = @import("consistent_hashing.zig");
+pub const recovery = @import("recovery.zig");
+pub const split_brain_protection = @import("split_brain_protection.zig");
 
 // Local aliases for internal use
 const types_local = types;
