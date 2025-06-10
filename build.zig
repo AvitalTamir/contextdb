@@ -184,6 +184,17 @@ pub fn build(b: *std.Build) void {
     const test_distributed_fuzzing_run = b.addRunArtifact(test_distributed_fuzzing_exe);
     test_distributed_fuzzing_step.dependOn(&test_distributed_fuzzing_run.step);
 
+    // MCP server tests
+    const test_mcp_step = b.step("test-mcp", "Run MCP server tests");
+    const test_mcp_exe = b.addTest(.{
+        .root_source_file = b.path("test/test_mcp.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_mcp_exe.root_module.addImport("contextdb", contextdb_module);
+    const test_mcp_run = b.addRunArtifact(test_mcp_exe);
+    test_mcp_step.dependOn(&test_mcp_run.step);
+
     // Fuzzing campaign runner
     const fuzz_runner_step = b.step("fuzz", "Run ContextDB fuzzing campaigns");
     const fuzz_runner_exe = b.addExecutable(.{
@@ -262,6 +273,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&test_raft_run.step);
     test_all_step.dependOn(&test_http_api_run.step);
     test_all_step.dependOn(&test_fuzzing_run.step);
+    test_all_step.dependOn(&test_mcp_run.step);
 
     // Comprehensive test suite including fuzzing
     const test_comprehensive_step = b.step("test-comprehensive", "Run all tests including fuzzing");
@@ -306,4 +318,19 @@ pub fn build(b: *std.Build) void {
     });
     const http_client_demo_run = b.addRunArtifact(http_client_demo_exe);
     http_client_demo_step.dependOn(&http_client_demo_run.step);
+
+    // Add MCP server example
+    const mcp_server_step = b.step("mcp-server", "Run Memora MCP Server for LLM integration");
+    const mcp_server_exe = b.addExecutable(.{
+        .name = "mcp_server",
+        .root_source_file = b.path("examples/mcp_server.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mcp_server_exe.root_module.addImport("contextdb", contextdb_module);
+    const mcp_server_run = b.addRunArtifact(mcp_server_exe);
+    if (b.args) |args| {
+        mcp_server_run.addArgs(args);
+    }
+    mcp_server_step.dependOn(&mcp_server_run.step);
 } 

@@ -18,6 +18,7 @@ pub const http_api = @import("http_api.zig");
 pub const monitoring = @import("monitoring.zig");
 pub const config_mod = @import("config.zig");
 pub const fuzzing = @import("fuzzing.zig");
+pub const mcp_server = @import("mcp_server.zig");
 
 // Local aliases for internal use
 const types_local = types;

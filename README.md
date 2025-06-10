@@ -395,4 +395,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Memora**: *Building the memory layer for the age of AI* 🧠✨
 
-Built with ❤️ and **Zig** for high-performance LLM memory infrastructure.
+Vibe-coded with ❤️ by AIs and humans, for AIs and humans.
