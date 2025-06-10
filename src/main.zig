@@ -21,6 +21,8 @@ pub const monitoring = @import("monitoring.zig");
 pub const config_mod = @import("config.zig");
 pub const fuzzing = @import("fuzzing.zig");
 pub const mcp_server = @import("mcp_server.zig");
+pub const gossip = @import("gossip.zig");
+pub const node_discovery = @import("node_discovery.zig");
 
 // Local aliases for internal use
 const types_local = types;

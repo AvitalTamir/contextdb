@@ -289,6 +289,7 @@ zig build fuzz-stress        # Stress testing with large datasets
 
 # Run distributed demo
 zig build demo-distributed   # Interactive cluster demonstration
+zig build gossip-demo        # Automatic node discovery demo
 ```
 
 ## 🎯 Performance Benchmarks
@@ -338,6 +339,17 @@ Semantic memory types optimized for LLM workflows instead of generic nodes
 - **✅ Memory Statistics & Analytics** - Distribution tracking and usage patterns
 
 **Demo**: Run `zig build llm-memory-demo` to see semantic memory storage and retrieval
+
+### ✅ **Gossip Protocol & Node Discovery (COMPLETE)** - *Latest Addition*
+Automatic node discovery and cluster formation without manual configuration
+
+- **✅ Gossip Protocol Implementation** - Epidemic-style node discovery with failure detection
+- **✅ Automatic Bootstrap** - Zero-configuration cluster formation using seed nodes
+- **✅ Node Health Monitoring** - Heartbeat-based failure detection and recovery
+- **✅ Dynamic Membership** - Nodes can join/leave clusters automatically
+- **✅ Raft Integration** - Discovered nodes automatically form Raft consensus clusters
+
+**Demo**: Run `zig build gossip-demo` to see automatic node discovery and cluster formation
 
 ### 🚧 **Strategic Priority Systems**
 

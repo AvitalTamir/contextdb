@@ -357,4 +357,16 @@ pub fn build(b: *std.Build) void {
     llm_memory_demo_exe.root_module.addImport("memora", memora_module);
     const llm_memory_demo_run = b.addRunArtifact(llm_memory_demo_exe);
     llm_memory_demo_step.dependOn(&llm_memory_demo_run.step);
+
+    // Add Gossip Protocol Demo - showcase automatic node discovery
+    const gossip_demo_step = b.step("gossip-demo", "Demonstrate gossip protocol for automatic node discovery and cluster formation");
+    const gossip_demo_exe = b.addExecutable(.{
+        .name = "gossip_demo",
+        .root_source_file = b.path("examples/gossip_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    gossip_demo_exe.root_module.addImport("memora", memora_module);
+    const gossip_demo_run = b.addRunArtifact(gossip_demo_exe);
+    gossip_demo_step.dependOn(&gossip_demo_run.step);
 } 
