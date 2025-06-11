@@ -42,6 +42,10 @@ pub const SnapshotManager = struct {
         defer allocator.free(edges_path);
         try std.fs.cwd().makePath(edges_path);
 
+        const memory_contents_path = try std.fs.path.join(allocator, &[_][]const u8{ base_path, "memory_contents" });
+        defer allocator.free(memory_contents_path);
+        try std.fs.cwd().makePath(memory_contents_path);
+
         // Find the latest snapshot ID
         const latest_id = try findLatestSnapshotId(allocator, base_path);
 
@@ -63,6 +67,7 @@ pub const SnapshotManager = struct {
         vectors: []const types.Vector,
         nodes: []const types.Node,
         edges: []const types.Edge,
+        memory_contents: []const types.MemoryContent,
     ) !SnapshotInfo {
         self.current_snapshot_id += 1;
         const snapshot_id = self.current_snapshot_id;
@@ -73,10 +78,12 @@ pub const SnapshotManager = struct {
             .vector_files = std.ArrayList([]const u8).init(self.allocator),
             .node_files = std.ArrayList([]const u8).init(self.allocator),
             .edge_files = std.ArrayList([]const u8).init(self.allocator),
+            .memory_content_files = std.ArrayList([]const u8).init(self.allocator),
             .counts = .{
                 .vectors = @intCast(vectors.len),
                 .nodes = @intCast(nodes.len),
                 .edges = @intCast(edges.len),
+                .memory_contents = @intCast(memory_contents.len),
             },
         };
 
@@ -114,6 +121,18 @@ pub const SnapshotManager = struct {
             try info.edge_files.append(try self.allocator.dupe(u8, edge_path));
             
             try self.writeEdgeFile(edge_path, edges);
+        }
+
+        // Write memory content files
+        if (memory_contents.len > 0) {
+            const memory_filename = try std.fmt.allocPrint(self.allocator, "memory-{:06}.json", .{snapshot_id});
+            defer self.allocator.free(memory_filename);
+            
+            const memory_path = try std.fs.path.join(self.allocator, &[_][]const u8{ "memory_contents", memory_filename });
+            defer self.allocator.free(memory_path);
+            try info.memory_content_files.append(try self.allocator.dupe(u8, memory_path));
+            
+            try self.writeMemoryContentFile(memory_path, memory_contents);
         }
 
         // Write snapshot metadata
@@ -233,6 +252,23 @@ pub const SnapshotManager = struct {
         return edges;
     }
 
+    /// Load memory contents from snapshot
+    pub fn loadMemoryContents(self: *SnapshotManager, snapshot_info: *const SnapshotInfo) !std.ArrayList(types.MemoryContent) {
+        var memory_contents = std.ArrayList(types.MemoryContent).init(self.allocator);
+        
+        for (snapshot_info.memory_content_files.items) |memory_file| {
+            const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, memory_file });
+            defer self.allocator.free(file_path);
+            
+            const file_memory_contents = try self.readMemoryContentFile(file_path);
+            defer file_memory_contents.deinit(); // Only free the array list, not the content strings
+            
+            try memory_contents.appendSlice(file_memory_contents.items);
+        }
+        
+        return memory_contents;
+    }
+
     /// Delete old snapshots, keeping only the latest N
     pub fn cleanup(self: *SnapshotManager, keep_count: u32) !u32 {
         const snapshots = try self.listSnapshots();
@@ -308,6 +344,46 @@ pub const SnapshotManager = struct {
         try file.writeAll("\n]\n");
     }
 
+    fn writeMemoryContentFile(self: *SnapshotManager, relative_path: []const u8, memory_contents: []const types.MemoryContent) !void {
+        const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, relative_path });
+        defer self.allocator.free(file_path);
+
+        const file = try std.fs.cwd().createFile(file_path, .{});
+        defer file.close();
+
+        // Write as JSON array
+        try file.writeAll("[\n");
+        for (memory_contents, 0..) |memory_content, i| {
+            if (i > 0) try file.writeAll(",\n");
+            
+            // Escape quotes in content for JSON
+            var escaped_content = std.ArrayList(u8).init(self.allocator);
+            defer escaped_content.deinit();
+            
+            for (memory_content.content) |char| {
+                if (char == '"') {
+                    try escaped_content.appendSlice("\\\"");
+                } else if (char == '\\') {
+                    try escaped_content.appendSlice("\\\\");
+                } else if (char == '\n') {
+                    try escaped_content.appendSlice("\\n");
+                } else if (char == '\r') {
+                    try escaped_content.appendSlice("\\r");
+                } else if (char == '\t') {
+                    try escaped_content.appendSlice("\\t");
+                } else {
+                    try escaped_content.append(char);
+                }
+            }
+            
+            const json_line = try std.fmt.allocPrint(self.allocator, "  {{\"memory_id\": {}, \"content\": \"{s}\"}}", .{ memory_content.memory_id, escaped_content.items });
+            defer self.allocator.free(json_line);
+            
+            try file.writeAll(json_line);
+        }
+        try file.writeAll("\n]\n");
+    }
+
     fn writeSnapshotMetadata(self: *SnapshotManager, info: *const SnapshotInfo) !void {
         const metadata_filename = try std.fmt.allocPrint(self.allocator, "snapshot-{:06}.json", .{info.snapshot_id});
         defer self.allocator.free(metadata_filename);
@@ -359,8 +435,18 @@ pub const SnapshotManager = struct {
         }
         try file.writeAll("],\n");
         
+        // Memory content files
+        try file.writeAll("  \"memory_content_files\": [");
+        for (info.memory_content_files.items, 0..) |memory_file, i| {
+            if (i > 0) try file.writeAll(", ");
+            const memory_file_str = try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{memory_file});
+            defer self.allocator.free(memory_file_str);
+            try file.writeAll(memory_file_str);
+        }
+        try file.writeAll("],\n");
+        
         // Counts
-        const counts_json = try std.fmt.allocPrint(self.allocator, "  \"counts\": {{\"vectors\": {}, \"nodes\": {}, \"edges\": {}}}\n", .{ info.counts.vectors, info.counts.nodes, info.counts.edges });
+        const counts_json = try std.fmt.allocPrint(self.allocator, "  \"counts\": {{\"vectors\": {}, \"nodes\": {}, \"edges\": {}, \"memory_contents\": {}}}\n", .{ info.counts.vectors, info.counts.nodes, info.counts.edges, info.counts.memory_contents });
         defer self.allocator.free(counts_json);
         try file.writeAll(counts_json);
         
@@ -408,7 +494,49 @@ pub const SnapshotManager = struct {
         const content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
         defer self.allocator.free(content);
 
-        return try self.parseEdgesJson(content);
+        var edges = std.ArrayList(types.Edge).init(self.allocator);
+
+        // Parse JSON array - basic parsing since we control the format
+        var start: usize = 0;
+        while (std.mem.indexOf(u8, content[start..], "{\"from\":")) |pos| {
+            const json_start = start + pos;
+            if (std.mem.indexOf(u8, content[json_start..], "}")) |end_pos| {
+                const json_end = json_start + end_pos + 1;
+                const json_str = content[json_start..json_end];
+                
+                const edge = try self.parseEdgeJson(json_str);
+                try edges.append(edge);
+                start = json_end;
+            } else break;
+        }
+
+        return edges;
+    }
+
+    fn readMemoryContentFile(self: *SnapshotManager, file_path: []const u8) !std.ArrayList(types.MemoryContent) {
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+
+        const content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
+        defer self.allocator.free(content);
+
+        var memory_contents = std.ArrayList(types.MemoryContent).init(self.allocator);
+
+        // Parse JSON array - basic parsing since we control the format
+        var start: usize = 0;
+        while (std.mem.indexOf(u8, content[start..], "{\"memory_id\":")) |pos| {
+            const json_start = start + pos;
+            if (std.mem.indexOf(u8, content[json_start..], "}")) |end_pos| {
+                const json_end = json_start + end_pos + 1;
+                const json_str = content[json_start..json_end];
+                
+                const memory_content = try self.parseMemoryContentJson(json_str);
+                try memory_contents.append(memory_content);
+                start = json_end;
+            } else break;
+        }
+
+        return memory_contents;
     }
 
     fn parseSnapshotMetadata(self: *SnapshotManager, json_content: []const u8) !SnapshotInfo {
@@ -420,7 +548,8 @@ pub const SnapshotManager = struct {
             .vector_files = std.ArrayList([]const u8).init(self.allocator),
             .node_files = std.ArrayList([]const u8).init(self.allocator),
             .edge_files = std.ArrayList([]const u8).init(self.allocator),
-            .counts = .{ .vectors = 0, .nodes = 0, .edges = 0 },
+            .memory_content_files = std.ArrayList([]const u8).init(self.allocator),
+            .counts = .{ .vectors = 0, .nodes = 0, .edges = 0, .memory_contents = 0 },
         };
 
         // This is a simplified parser - in production, use std.json
@@ -456,6 +585,9 @@ pub const SnapshotManager = struct {
             } else if (std.mem.indexOf(u8, trimmed, "\"edge_files\":")) |_| {
                 // Parse edge_files array
                 try self.parseFileArray(trimmed, &info.edge_files);
+            } else if (std.mem.indexOf(u8, trimmed, "\"memory_content_files\":")) |_| {
+                // Parse memory_content_files array
+                try self.parseFileArray(trimmed, &info.memory_content_files);
             }
         }
 
@@ -528,45 +660,87 @@ pub const SnapshotManager = struct {
         return nodes;
     }
 
-    fn parseEdgesJson(self: *SnapshotManager, json_content: []const u8) !std.ArrayList(types.Edge) {
-        var edges = std.ArrayList(types.Edge).init(self.allocator);
-        
-        // Simple JSON parsing - extract from, to, kind
-        var lines = std.mem.splitSequence(u8, json_content, "\n");
-        while (lines.next()) |line| {
-            const trimmed = std.mem.trim(u8, line, " \t\r\n,");
-            if (std.mem.indexOf(u8, trimmed, "\"from\":") != null and std.mem.indexOf(u8, trimmed, "\"to\":") != null and std.mem.indexOf(u8, trimmed, "\"kind\":") != null) {
-                var from: u64 = 0;
-                var to: u64 = 0;
-                var kind: u8 = 0;
-                
-                // Extract values (simplified parsing)
-                var parts = std.mem.splitScalar(u8, trimmed, ',');
-                while (parts.next()) |part| {
-                    const trimmed_part = std.mem.trim(u8, part, " {}");
-                    if (std.mem.indexOf(u8, trimmed_part, "\"from\":")) |_| {
-                        if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
-                            const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
-                            from = std.fmt.parseInt(u64, value_str, 10) catch 0;
-                        }
-                    } else if (std.mem.indexOf(u8, trimmed_part, "\"to\":")) |_| {
-                        if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
-                            const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
-                            to = std.fmt.parseInt(u64, value_str, 10) catch 0;
-                        }
-                    } else if (std.mem.indexOf(u8, trimmed_part, "\"kind\":")) |_| {
-                        if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
-                            const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
-                            kind = std.fmt.parseInt(u8, value_str, 10) catch 0;
-                        }
-                    }
+    fn parseEdgeJson(self: *SnapshotManager, json_str: []const u8) !types.Edge {
+        // Parse JSON string to Edge
+        _ = self; // Mark unused
+        var edge = types.Edge{ .from = 0, .to = 0, .kind = 0 };
+        var parts = std.mem.splitScalar(u8, json_str, ',');
+        while (parts.next()) |part| {
+            const trimmed_part = std.mem.trim(u8, part, " {}");
+            if (std.mem.indexOf(u8, trimmed_part, "\"from\":")) |_| {
+                if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
+                    const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
+                    edge.from = std.fmt.parseInt(u64, value_str, 10) catch 0;
                 }
-                
-                try edges.append(types.Edge{ .from = from, .to = to, .kind = kind });
+            } else if (std.mem.indexOf(u8, trimmed_part, "\"to\":")) |_| {
+                if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
+                    const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
+                    edge.to = std.fmt.parseInt(u64, value_str, 10) catch 0;
+                }
+            } else if (std.mem.indexOf(u8, trimmed_part, "\"kind\":")) |_| {
+                if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
+                    const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
+                    edge.kind = std.fmt.parseInt(u8, value_str, 10) catch 0;
+                }
+            }
+        }
+        return edge;
+    }
+
+    fn parseMemoryContentJson(self: *SnapshotManager, json_str: []const u8) !types.MemoryContent {
+        // Parse JSON string to MemoryContent
+        var memory_id: u64 = 0;
+        var content_str: []const u8 = "";
+        
+        // Find memory_id
+        if (std.mem.indexOf(u8, json_str, "\"memory_id\":")) |id_start| {
+            const id_colon = id_start + 12; // skip "memory_id":
+            if (std.mem.indexOf(u8, json_str[id_colon..], ",")) |comma_pos| {
+                const id_str = std.mem.trim(u8, json_str[id_colon..id_colon + comma_pos], " ");
+                memory_id = std.fmt.parseInt(u64, id_str, 10) catch 0;
             }
         }
         
-        return edges;
+        // Find content
+        if (std.mem.indexOf(u8, json_str, "\"content\":")) |content_start| {
+            const content_colon = content_start + 10; // skip "content":
+            if (std.mem.indexOf(u8, json_str[content_colon..], "\"")) |quote_start| {
+                const content_begin = content_colon + quote_start + 1;
+                if (std.mem.lastIndexOf(u8, json_str[content_begin..], "\"")) |quote_end| {
+                    content_str = json_str[content_begin..content_begin + quote_end];
+                    
+                    // Unescape JSON strings
+                    var unescaped_content = std.ArrayList(u8).init(self.allocator);
+                    defer unescaped_content.deinit();
+                    
+                    var i: usize = 0;
+                    while (i < content_str.len) {
+                        if (content_str[i] == '\\' and i + 1 < content_str.len) {
+                            switch (content_str[i + 1]) {
+                                '"' => try unescaped_content.append('"'),
+                                '\\' => try unescaped_content.append('\\'),
+                                'n' => try unescaped_content.append('\n'),
+                                'r' => try unescaped_content.append('\r'),
+                                't' => try unescaped_content.append('\t'),
+                                else => {
+                                    try unescaped_content.append(content_str[i]);
+                                    try unescaped_content.append(content_str[i + 1]);
+                                },
+                            }
+                            i += 2;
+                        } else {
+                            try unescaped_content.append(content_str[i]);
+                            i += 1;
+                        }
+                    }
+                    
+                    const final_content = try self.allocator.dupe(u8, unescaped_content.items);
+                    return types.MemoryContent{ .memory_id = memory_id, .content = final_content };
+                }
+            }
+        }
+        
+        return types.MemoryContent{ .memory_id = memory_id, .content = try self.allocator.dupe(u8, "") };
     }
 
     fn deleteSnapshot(self: *SnapshotManager, snapshot_id: u64) !bool {
@@ -611,10 +785,12 @@ pub const SnapshotInfo = struct {
     vector_files: std.ArrayList([]const u8),
     node_files: std.ArrayList([]const u8),
     edge_files: std.ArrayList([]const u8),
+    memory_content_files: std.ArrayList([]const u8),
     counts: struct {
         vectors: u64,
         nodes: u64,
         edges: u64,
+        memory_contents: u64,
     },
 
     pub fn deinit(self: *const SnapshotInfo) void {
@@ -632,6 +808,11 @@ pub const SnapshotInfo = struct {
             self.edge_files.allocator.free(file);
         }
         self.edge_files.deinit();
+        
+        for (self.memory_content_files.items) |file| {
+            self.memory_content_files.allocator.free(file);
+        }
+        self.memory_content_files.deinit();
         
         self.vector_files.allocator.free(self.timestamp);
     }
@@ -713,7 +894,7 @@ test "SnapshotManager create and load snapshot" {
     };
 
     // Create snapshot
-    const snapshot_info = try manager.createSnapshot(&test_vectors, &test_nodes, &test_edges);
+    const snapshot_info = try manager.createSnapshot(&test_vectors, &test_nodes, &test_edges, &[_]types.MemoryContent{});
     defer snapshot_info.deinit();
 
     try std.testing.expect(snapshot_info.snapshot_id == 1);
@@ -872,7 +1053,7 @@ test "SnapshotManager configuration integration test" {
     };
     
     // Create snapshot with correct parameter order: vectors, nodes, edges
-    const snapshot_info = try manager.createSnapshot(&[_]types.Vector{}, &test_nodes, &[_]types.Edge{});
+    const snapshot_info = try manager.createSnapshot(&[_]types.Vector{}, &test_nodes, &[_]types.Edge{}, &[_]types.MemoryContent{});
     defer snapshot_info.deinit();
     
     // Verify snapshot was created successfully

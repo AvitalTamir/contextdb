@@ -87,6 +87,20 @@ pub const Vector = struct {
     }
 };
 
+/// Memory content entry for LLM memory persistence
+/// Stores the full text content associated with memory IDs
+pub const MemoryContent = struct {
+    memory_id: u64,
+    content: []const u8,
+    
+    pub fn init(memory_id: u64, content: []const u8) MemoryContent {
+        return MemoryContent{
+            .memory_id = memory_id,
+            .content = content,
+        };
+    }
+};
+
 /// Query result types
 pub const SimilarityResult = struct {
     id: u64,

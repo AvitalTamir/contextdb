@@ -16,6 +16,7 @@ pub fn main() !void {
 
     var data_path: []const u8 = "memora_mcp_data";
     var transport_type: []const u8 = "stdio";
+    var populate_samples: bool = false;
 
     // Simple argument parsing
     while (args.next()) |arg| {
@@ -23,6 +24,8 @@ pub fn main() !void {
             data_path = arg[7..];
         } else if (std.mem.startsWith(u8, arg, "--transport=")) {
             transport_type = arg[12..];
+        } else if (std.mem.eql(u8, arg, "--with-samples")) {
+            populate_samples = true;
         } else if (std.mem.eql(u8, arg, "--help")) {
             printHelp();
             return;
@@ -40,6 +43,7 @@ pub fn main() !void {
     std.debug.print("Memora MCP Server initializing...\n", .{});
     std.debug.print("Data path: {s}\n", .{data_path});
     std.debug.print("Transport: {s}\n", .{transport_type});
+    std.debug.print("Sample memories: {}\n", .{populate_samples});
 
     // Initialize Memora for memory storage
     const config = memora.MemoraConfig{
@@ -56,10 +60,12 @@ pub fn main() !void {
 
     std.debug.print("Memora database initialized successfully\n", .{});
 
-    // Pre-populate with some sample memories for demo purposes
-    if (try shouldPopulateSampleMemories(&db)) {
+    // Pre-populate with some sample memories for demo purposes (if enabled)
+    if (populate_samples and try shouldPopulateSampleMemories(&db)) {
         try populateSampleMemories(&db);
         std.debug.print("Sample memories populated\n", .{});
+    } else if (!populate_samples) {
+        std.debug.print("Sample memories disabled\n", .{});
     }
 
     // Initialize MCP server
@@ -81,13 +87,15 @@ fn printHelp() void {
     std.debug.print("Options:\n", .{});
     std.debug.print("  --data=PATH        Set memory data directory (default: memora_mcp_data)\n", .{});
     std.debug.print("  --transport=TYPE   Set transport type (default: stdio)\n", .{});
+    std.debug.print("  --with-samples     Enable sample memory population\n", .{});
     std.debug.print("  --help             Show this help message\n\n", .{});
     std.debug.print("Transport Types:\n", .{});
     std.debug.print("  stdio              Standard input/output (for direct LLM integration)\n\n", .{});
     std.debug.print("Examples:\n", .{});
     std.debug.print("  mcp_server                                   # Default stdio transport\n", .{});
     std.debug.print("  mcp_server --data=/var/lib/memora           # Custom data directory\n", .{});
-    std.debug.print("  mcp_server --transport=stdio --data=./mem   # Explicit configuration\n\n", .{});
+    std.debug.print("  mcp_server --transport=stdio --data=./mem   # Explicit configuration\n", .{});
+    std.debug.print("  mcp_server --with-samples                   # Start with sample memories\n\n", .{});
     std.debug.print("LLM Integration:\n", .{});
     std.debug.print("  This server implements the Model Context Protocol (MCP) for LLM integration.\n", .{});
     std.debug.print("  LLMs can use this server to store and retrieve long-term memories.\n", .{});

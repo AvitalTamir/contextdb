@@ -376,12 +376,20 @@ pub const Memora = struct {
         
         const edges = try self.getAllEdges();
         defer edges.deinit();
+        
+        const memory_contents = try self.getAllMemoryContent();
+        defer {
+            // Free the allocated content strings
+            for (memory_contents.items) |memory_content| {
+                self.allocator.free(memory_content.content);
+            }
+            memory_contents.deinit();
+        }
 
-        // Create snapshot
-        const snapshot_info = try self.snapshot_manager.createSnapshot(vectors.items, nodes.items, edges.items);
+        // Create snapshot with memory contents included
+        const snapshot_info = try self.snapshot_manager.createSnapshot(vectors.items, nodes.items, edges.items, memory_contents.items);
 
-        // Clear the append log since all data is now in the snapshot
-        // This prevents duplicate entries during recovery
+        // Now we can safely clear the append log since memory content is preserved in snapshot
         try self.append_log.clear();
 
         // Upload to S3 if configured
@@ -489,10 +497,11 @@ pub const Memora = struct {
                 var snapshot_info = try self.createSnapshot();
                 defer snapshot_info.deinit();
                 
-                // Clear the log after successful snapshot if configured  
-                if (self.append_log.config.snapshot_auto_clear_log) {
-                    try self.append_log.clear();
-                }
+                // DO NOT clear the log after successful snapshot since it contains memory_content entries
+                // that are not included in snapshots. This preserves full memory content for MemoryManager.
+                // if (self.append_log.config.snapshot_auto_clear_log) {
+                //     try self.append_log.clear();
+                // }
                 
                 // Auto cleanup if enabled
                 if (self.snapshot_manager.config.cleanup_auto_enable) {
@@ -546,6 +555,9 @@ pub const Memora = struct {
         for (edges.items) |edge| {
             try self.graph_index.addEdge(edge);
         }
+
+        // Note: Memory contents are handled separately by MemoryManager
+        // when it calls loadMemoryContentsFromSnapshot during its initialization
     }
 
     fn replayFromLog(self: *Memora) !void {
@@ -597,7 +609,8 @@ pub const Memora = struct {
         return nodes;
     }
 
-    fn getAllEdges(self: *Memora) !std.ArrayList(types.Edge) {
+    /// Get all edges from the database
+    pub fn getAllEdges(self: *Memora) !std.ArrayList(types.Edge) {
         var edges = std.ArrayList(types.Edge).init(self.allocator);
         
         var iter = self.graph_index.outgoing_edges.iterator();
@@ -608,6 +621,28 @@ pub const Memora = struct {
         }
         
         return edges;
+    }
+
+    /// Get all memory content from the append log
+    pub fn getAllMemoryContent(self: *Memora) !std.ArrayList(types.MemoryContent) {
+        var memory_contents = std.ArrayList(types.MemoryContent).init(self.allocator);
+        
+        var iter = self.append_log.iterator();
+        while (iter.next()) |entry| {
+            if (entry.getEntryType() == .memory_content) {
+                if (entry.asMemoryContent()) |mem_content| {
+                    // Allocate a copy of the content for the snapshot
+                    const content_copy = try self.allocator.dupe(u8, mem_content.content);
+                    const memory_content = types.MemoryContent{
+                        .memory_id = mem_content.memory_id,
+                        .content = content_copy,
+                    };
+                    try memory_contents.append(memory_content);
+                }
+            }
+        }
+        
+        return memory_contents;
     }
 
     /// Load data from storage with persistent index fast path

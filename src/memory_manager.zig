@@ -532,33 +532,114 @@ pub const MemoryManager = struct {
         return embedding;
     }
     
-    /// Load existing memory content from the log during initialization
+    /// Load existing memory content from the log and snapshots during initialization
     pub fn loadExistingMemories(self: *Self) !void {
         var max_memory_id: u64 = 0;
-        var iter = self.memora.append_log.iterator();
         
-        // First pass: load all memory content entries
+        // First try to load from the latest snapshot if available
+        if (try self.memora.snapshot_manager.loadLatestSnapshot()) |snapshot_info| {
+            defer snapshot_info.deinit();
+            
+            if (snapshot_info.memory_content_files.items.len > 0) {
+                const memory_contents = try self.memora.snapshot_manager.loadMemoryContents(&snapshot_info);
+                defer {
+                    // Free the allocated content strings
+                    for (memory_contents.items) |memory_content| {
+                        self.allocator.free(memory_content.content);
+                    }
+                    memory_contents.deinit();
+                }
+                
+                // Load memory contents from snapshot
+                for (memory_contents.items) |memory_content| {
+                    const content_copy = try self.allocator.dupe(u8, memory_content.content);
+                    try self.memory_content.put(memory_content.memory_id, content_copy);
+                    max_memory_id = @max(max_memory_id, memory_content.memory_id);
+                }
+                
+                std.debug.print("Loaded {} memories from snapshot\n", .{memory_contents.items.len});
+            }
+        }
+        
+        // Then load any additional memory content entries from log
+        var iter = self.memora.append_log.iterator();
         while (iter.next()) |entry| {
             if (entry.getEntryType() == .memory_content) {
                 if (entry.asMemoryContent()) |mem_content| {
-                    // Store the content in our cache
-                    const content_copy = try self.allocator.dupe(u8, mem_content.content);
-                    try self.memory_content.put(mem_content.memory_id, content_copy);
+                    // Only add if we don't already have this memory ID from snapshot
+                    if (!self.memory_content.contains(mem_content.memory_id)) {
+                        const content_copy = try self.allocator.dupe(u8, mem_content.content);
+                        try self.memory_content.put(mem_content.memory_id, content_copy);
+                    }
                     
-                    // Track the highest memory ID to set next_memory_id
+                    // Track the maximum memory ID
                     max_memory_id = @max(max_memory_id, mem_content.memory_id);
                 }
             }
         }
         
-        // Set next_memory_id to avoid conflicts
+        // Final pass: reconstruct content for memory nodes that exist but don't have content entries
+        // This handles the case where snapshots were created and log was cleared
+        try self.loadMemoriesFromLoadedNodes(max_memory_id);
+        
+        // Set the next memory ID to be one higher than the maximum found
         if (max_memory_id > 0) {
             self.next_memory_id = max_memory_id + 1;
         }
         
-        std.debug.print("Loaded {} existing memories from log, next ID: {}\n", .{ 
-            self.memory_content.count(), self.next_memory_id 
-        });
+        std.debug.print("Loaded {} total memories, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
+    }
+    
+    /// Load memory contents from snapshot data during database restoration
+    pub fn loadMemoryContentsFromSnapshot(self: *Self, memory_contents: []const types.MemoryContent) !void {
+        var max_memory_id: u64 = 0;
+        
+        // Clear existing content cache
+        var iterator = self.memory_content.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.memory_content.clearAndFree();
+        
+        // Load memory contents from snapshot
+        for (memory_contents) |memory_content| {
+            const content_copy = try self.allocator.dupe(u8, memory_content.content);
+            try self.memory_content.put(memory_content.memory_id, content_copy);
+            max_memory_id = @max(max_memory_id, memory_content.memory_id);
+        }
+        
+        // Update next_memory_id to prevent ID collisions
+        if (max_memory_id > 0) {
+            self.next_memory_id = max_memory_id + 1;
+        }
+        
+        std.debug.print("Loaded {} memory contents from snapshot, next ID: {}\n", .{ memory_contents.len, self.next_memory_id });
+    }
+    
+    /// Reconstruct memory content from nodes that were loaded from snapshots
+    /// but don't have corresponding memory_content entries in the log
+    fn loadMemoriesFromLoadedNodes(self: *Self, max_memory_id: u64) !void {
+        _ = max_memory_id; // Mark unused
+        var node_iter = self.memora.graph_index.nodes.iterator();
+        
+        while (node_iter.next()) |entry| {
+            const node = entry.value_ptr.*;
+            const node_id = node.id;
+            
+            // Skip if we already have content for this memory ID
+            if (self.memory_content.contains(node_id)) continue;
+            
+            // Check if this looks like a memory node by examining the label structure
+            // Memory nodes have structured metadata in their label
+            if (node.label[0] < 10 and node.label[1] < 5 and node.label[2] < 5 and node.label[3] < 6) {
+                // This looks like a memory node - create a placeholder content string
+                // since we can't recover the full original content from snapshots
+                const placeholder_content = try std.fmt.allocPrint(self.allocator, "[Recovered memory ID {}]", .{node_id});
+                try self.memory_content.put(node_id, placeholder_content);
+                
+                std.debug.print("Reconstructed memory {} from snapshot (content unavailable)\n", .{node_id});
+            }
+        }
     }
 };
 
