@@ -39,7 +39,7 @@ pub const MemoryManager = struct {
     const Self = @This();
     
     pub fn init(allocator: std.mem.Allocator, memora: *Memora) Self {
-        return Self{
+        var manager = Self{
             .allocator = allocator,
             .memora = memora,
             .memory_content = std.AutoHashMap(u64, []u8).init(allocator),
@@ -49,6 +49,14 @@ pub const MemoryManager = struct {
             .next_session_id = 1,
             .embedding_cache = std.AutoHashMap(u64, [128]f32).init(allocator),
         };
+        
+        // Load existing memory content from the log
+        manager.loadExistingMemories() catch {
+            // If we can't load existing memories, continue with empty state
+            std.debug.print("Warning: Failed to load existing memories from log\n", .{});
+        };
+        
+        return manager;
     }
     
     pub fn deinit(self: *Self) void {
@@ -522,6 +530,35 @@ pub const MemoryManager = struct {
         }
         
         return embedding;
+    }
+    
+    /// Load existing memory content from the log during initialization
+    pub fn loadExistingMemories(self: *Self) !void {
+        var max_memory_id: u64 = 0;
+        var iter = self.memora.append_log.iterator();
+        
+        // First pass: load all memory content entries
+        while (iter.next()) |entry| {
+            if (entry.getEntryType() == .memory_content) {
+                if (entry.asMemoryContent()) |mem_content| {
+                    // Store the content in our cache
+                    const content_copy = try self.allocator.dupe(u8, mem_content.content);
+                    try self.memory_content.put(mem_content.memory_id, content_copy);
+                    
+                    // Track the highest memory ID to set next_memory_id
+                    max_memory_id = @max(max_memory_id, mem_content.memory_id);
+                }
+            }
+        }
+        
+        // Set next_memory_id to avoid conflicts
+        if (max_memory_id > 0) {
+            self.next_memory_id = max_memory_id + 1;
+        }
+        
+        std.debug.print("Loaded {} existing memories from log, next ID: {}\n", .{ 
+            self.memory_content.count(), self.next_memory_id 
+        });
     }
 };
 
