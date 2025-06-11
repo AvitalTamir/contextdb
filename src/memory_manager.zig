@@ -532,32 +532,40 @@ pub const MemoryManager = struct {
         return embedding;
     }
     
-    /// Load existing memory content from the log and snapshots during initialization
+    /// Load existing memories from snapshots and log during initialization
     pub fn loadExistingMemories(self: *Self) !void {
         var max_memory_id: u64 = 0;
         
-        // First try to load from the latest snapshot if available
-        if (try self.memora.snapshot_manager.loadLatestSnapshot()) |snapshot_info| {
-            defer snapshot_info.deinit();
-            
-            if (snapshot_info.memory_content_files.items.len > 0) {
-                const memory_contents = try self.memora.snapshot_manager.loadMemoryContents(&snapshot_info);
-                defer {
-                    // Free the allocated content strings
-                    for (memory_contents.items) |memory_content| {
-                        self.allocator.free(memory_content.content);
+        // First, load memory content from ALL snapshots (not just the latest)
+        const all_snapshots = try self.memora.snapshot_manager.listSnapshots();
+        defer all_snapshots.deinit();
+        
+        for (all_snapshots.items) |snapshot_id| {
+            if (try self.memora.snapshot_manager.loadSnapshot(snapshot_id)) |snapshot_info| {
+                defer snapshot_info.deinit();
+                
+                if (snapshot_info.memory_content_files.items.len > 0) {
+                    const memory_contents = try self.memora.snapshot_manager.loadMemoryContents(&snapshot_info);
+                    defer {
+                        // Free the allocated content strings
+                        for (memory_contents.items) |memory_content| {
+                            self.allocator.free(memory_content.content);
+                        }
+                        memory_contents.deinit();
                     }
-                    memory_contents.deinit();
+                    
+                    // Load memory contents from this snapshot
+                    for (memory_contents.items) |memory_content| {
+                        // Only add if we don't already have this memory ID (avoid duplicates)
+                        if (!self.memory_content.contains(memory_content.memory_id)) {
+                            const content_copy = try self.allocator.dupe(u8, memory_content.content);
+                            try self.memory_content.put(memory_content.memory_id, content_copy);
+                        }
+                        max_memory_id = @max(max_memory_id, memory_content.memory_id);
+                    }
+                    
+                    std.debug.print("Loaded {} memories from snapshot {}\n", .{memory_contents.items.len, snapshot_id});
                 }
-                
-                // Load memory contents from snapshot
-                for (memory_contents.items) |memory_content| {
-                    const content_copy = try self.allocator.dupe(u8, memory_content.content);
-                    try self.memory_content.put(memory_content.memory_id, content_copy);
-                    max_memory_id = @max(max_memory_id, memory_content.memory_id);
-                }
-                
-                std.debug.print("Loaded {} memories from snapshot\n", .{memory_contents.items.len});
             }
         }
         
@@ -566,7 +574,7 @@ pub const MemoryManager = struct {
         while (iter.next()) |entry| {
             if (entry.getEntryType() == .memory_content) {
                 if (entry.asMemoryContent()) |mem_content| {
-                    // Only add if we don't already have this memory ID from snapshot
+                    // Only add if we don't already have this memory ID from snapshots
                     if (!self.memory_content.contains(mem_content.memory_id)) {
                         const content_copy = try self.allocator.dupe(u8, mem_content.content);
                         try self.memory_content.put(mem_content.memory_id, content_copy);
@@ -587,7 +595,7 @@ pub const MemoryManager = struct {
             self.next_memory_id = max_memory_id + 1;
         }
         
-        std.debug.print("Loaded {} total memories, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
+        std.debug.print("Loaded {} total memories from all snapshots, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
     }
     
     /// Load memory contents from snapshot data during database restoration
