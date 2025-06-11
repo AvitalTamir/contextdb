@@ -13,7 +13,7 @@ pub const SnapshotManager = struct {
     pub fn init(allocator: std.mem.Allocator, base_path: []const u8, snapshot_config: ?SnapshotConfig) !SnapshotManager {
         // Use provided config or defaults
         const config_to_use = snapshot_config orelse SnapshotConfig{
-            .auto_interval = 0,
+            .auto_interval = 50, // Enable auto-snapshots by default every 50 log entries
             .max_metadata_size_mb = 10,
             .compression_enable = false,
             .cleanup_keep_count = 10,
@@ -820,7 +820,7 @@ test "SnapshotManager with default configuration" {
     defer manager.deinit();
     
     // Verify default configuration
-    try std.testing.expect(manager.config.auto_interval == 0);
+    try std.testing.expect(manager.config.auto_interval == 50);
     try std.testing.expect(manager.config.max_metadata_size_mb == 10);
     try std.testing.expect(manager.config.compression_enable == false);
     try std.testing.expect(manager.config.cleanup_keep_count == 10);
