@@ -337,7 +337,15 @@ pub const MemoryManager = struct {
         // Count relationships
         var edge_iter = self.memora.graph_index.outgoing_edges.iterator();
         while (edge_iter.next()) |entry| {
-            stats.total_relationships += entry.value_ptr.items.len;
+            const edges_list = entry.value_ptr.*;
+            for (edges_list.items) |edge| {
+                stats.total_relationships += 1;
+                
+                // Check if this edge involves concept nodes
+                if (edge.from >= 0x8000000000000000 or edge.to >= 0x8000000000000000) {
+                    stats.concept_relationships += 1;
+                }
+            }
         }
         
         return stats;
@@ -541,6 +549,8 @@ pub const MemoryManager = struct {
     
     /// Load existing memories from snapshots and log during initialization
     pub fn loadExistingMemories(self: *Self) !void {
+        std.debug.print("🧠 MemoryManager: Loading existing memories...\n", .{});
+        
         var max_memory_id: u64 = 0;
         var loaded_files = std.StringHashMap(void).init(self.allocator);
         defer loaded_files.deinit();
@@ -549,11 +559,17 @@ pub const MemoryManager = struct {
         const all_snapshots = try self.memora.snapshot_manager.listSnapshots();
         defer all_snapshots.deinit();
         
-        for (all_snapshots.items) |snapshot_id| {
+        std.debug.print("🧠 Found {} snapshots to scan for memories\n", .{all_snapshots.items.len});
+        
+        for (all_snapshots.items, 0..) |snapshot_id, i| {
+            std.debug.print("🧠 [{}/{}] Checking snapshot {} for memories...\n", .{ i + 1, all_snapshots.items.len, snapshot_id });
+            
             if (try self.memora.snapshot_manager.loadSnapshot(snapshot_id)) |snapshot_info| {
                 defer snapshot_info.deinit();
                 
                 if (snapshot_info.memory_content_files.items.len > 0) {
+                    std.debug.print("🧠 Snapshot {} has {} memory content files\n", .{ snapshot_id, snapshot_info.memory_content_files.items.len });
+                    
                     const memory_contents = try self.memora.snapshot_manager.loadMemoryContents(&snapshot_info);
                     defer {
                         // Free the allocated content strings
@@ -585,7 +601,7 @@ pub const MemoryManager = struct {
                                 const node = memory.toNode();
                                 try self.memora.insertNode(node);
                                 
-                                std.debug.print("  Recreated node {} in graph index\n", .{memory_content.memory_id});
+                                std.debug.print("🧠   Recreated node {} in graph index\n", .{memory_content.memory_id});
                             }
                             
                             // CRITICAL FIX: Also recreate vector embedding if it doesn't exist
@@ -595,14 +611,18 @@ pub const MemoryManager = struct {
                                 try self.memora.insertVector(vector);
                                 try self.embedding_cache.put(memory_content.memory_id, embedding);
                                 
-                                std.debug.print("  Recreated vector embedding {} for semantic search\n", .{memory_content.memory_id});
+                                std.debug.print("🧠   Recreated vector embedding {} for semantic search\n", .{memory_content.memory_id});
                             }
                         }
                         max_memory_id = @max(max_memory_id, memory_content.memory_id);
                     }
                     
-                    std.debug.print("Loaded {} memories from snapshot {}\n", .{memory_contents.items.len, snapshot_id});
+                    std.debug.print("🧠 ✅ Loaded {} memories from snapshot {}\n", .{ memory_contents.items.len, snapshot_id });
+                } else {
+                    std.debug.print("🧠 Snapshot {} has no memory content files\n", .{snapshot_id});
                 }
+            } else {
+                std.debug.print("🧠 ❌ Failed to load snapshot {}\n", .{snapshot_id});
             }
         }
         
@@ -682,7 +702,7 @@ pub const MemoryManager = struct {
                                 const node = memory.toNode();
                                 try self.memora.insertNode(node);
                                 
-                                std.debug.print("  Recreated node {} from orphaned file\n", .{memory_content.memory_id});
+                                std.debug.print("🧠   Recreated node {} from orphaned file\n", .{memory_content.memory_id});
                             }
                             
                             // CRITICAL FIX: Also recreate vector embedding if it doesn't exist
@@ -692,7 +712,7 @@ pub const MemoryManager = struct {
                                 try self.memora.insertVector(vector);
                                 try self.embedding_cache.put(memory_content.memory_id, embedding);
                                 
-                                std.debug.print("  Recreated vector embedding {} from orphaned file\n", .{memory_content.memory_id});
+                                std.debug.print("🧠   Recreated vector embedding {} from orphaned file\n", .{memory_content.memory_id});
                             }
                         }
                         max_memory_id = @max(max_memory_id, memory_content.memory_id);
@@ -729,7 +749,61 @@ pub const MemoryManager = struct {
             self.next_memory_id = max_memory_id + 1;
         }
         
-        std.debug.print("Loaded {} total memories from snapshots and log, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
+        std.debug.print("🧠 Loaded {} total memories from snapshots and log, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
+        
+        // Debug: Show what's actually in the graph after loading
+        std.debug.print("🔍 DEBUG: Graph state after loading:\n", .{});
+        
+        // Count and show nodes by type
+        var memory_nodes: u32 = 0;
+        var concept_nodes: u32 = 0;
+        var total_nodes: u32 = 0;
+        
+        var node_iter = self.memora.graph_index.nodes.iterator();
+        while (node_iter.next()) |entry| {
+            const node_id = entry.key_ptr.*;
+            total_nodes += 1;
+            
+            if (node_id >= 0x8000000000000000) {
+                concept_nodes += 1;
+                if (concept_nodes <= 5) { // Show first 5 concept nodes
+                    std.debug.print("🔍   Concept node: {} (label: '{s}')\n", .{ node_id, entry.value_ptr.getLabelAsString() });
+                }
+            } else {
+                memory_nodes += 1;
+                if (memory_nodes <= 5) { // Show first 5 memory nodes
+                    std.debug.print("🔍   Memory node: {} (label: '{s}')\n", .{ node_id, entry.value_ptr.getLabelAsString() });
+                }
+            }
+        }
+        
+        std.debug.print("🔍 Total nodes: {} (memory: {}, concept: {})\n", .{ total_nodes, memory_nodes, concept_nodes });
+        
+        // Count and show edges
+        var total_edges: u32 = 0;
+        var concept_edges: u32 = 0;
+        
+        var edge_iter = self.memora.graph_index.outgoing_edges.iterator();
+        while (edge_iter.next()) |entry| {
+            const edges_list = entry.value_ptr.*;
+            for (edges_list.items) |edge| {
+                total_edges += 1;
+                
+                // Check if this edge involves concept nodes
+                if (edge.from >= 0x8000000000000000 or edge.to >= 0x8000000000000000) {
+                    concept_edges += 1;
+                    if (concept_edges <= 5) { // Show first 5 concept edges
+                        std.debug.print("🔍   Concept edge: {} -> {} (kind: {})\n", .{ edge.from, edge.to, edge.kind });
+                    }
+                }
+            }
+        }
+        
+        std.debug.print("🔍 Total edges: {} (concept-related: {})\n", .{ total_edges, concept_edges });
+        
+        // Show vector count
+        const vector_count = self.memora.vector_index.getVectorCount();
+        std.debug.print("🔍 Total vectors: {}\n", .{vector_count});
     }
     
     /// Load memory contents from snapshot data during database restoration

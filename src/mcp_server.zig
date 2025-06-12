@@ -1424,6 +1424,8 @@ pub const McpServer = struct {
         // Find the concept node
         const concept_id = self.generateConceptId(concept_name);
         
+        std.debug.print("🔍 Searching for concept: '{s}' -> ID: {}\n", .{ concept_name, concept_id });
+        
         var content_list = std.ArrayList(u8).init(self.allocator);
         defer content_list.deinit();
         
@@ -1432,19 +1434,27 @@ pub const McpServer = struct {
         defer self.allocator.free(header);
         try content_list.appendSlice(header);
         
-        if (self.db.graph_index.getNode(concept_id)) |_| {
+        if (self.db.graph_index.getNode(concept_id)) |concept_node| {
+            std.debug.print("🔍 ✅ Found concept node: '{s}' ({})\n", .{ concept_node.getLabelAsString(), concept_id });
+            
             // Find all memories that link to this concept
             var found_count: u32 = 0;
             
             if (self.db.graph_index.getIncomingEdges(concept_id)) |incoming_edges| {
+                std.debug.print("🔍 Found {} incoming edges to concept\n", .{incoming_edges.len});
+                
                 for (incoming_edges) |edge| {
                     if (found_count >= limit) break;
+                    
+                    std.debug.print("🔍   Edge: {} -> {} (kind: {})\n", .{ edge.from, edge.to, edge.kind });
                     
                     if (edge.getKind() == types.EdgeKind.related) {
                         if (self.db.graph_index.getNode(edge.from)) |memory_node| {
                             // Check if this is a memory node (not another concept)
                             if (edge.from < 0x8000000000000000) { // Memory nodes have lower IDs
                                 found_count += 1;
+                                
+                                std.debug.print("🔍   ✅ Found memory node: {}\n", .{edge.from});
                                 
                                 // Get full memory content from MemoryManager
                                 const memory_content = if (try self.memory_manager.getMemory(memory_node.id)) |memory| 
@@ -1457,10 +1467,18 @@ pub const McpServer = struct {
                                     .{ found_count, memory_node.id, memory_content });
                                 defer self.allocator.free(memory_text);
                                 try content_list.appendSlice(memory_text);
+                            } else {
+                                std.debug.print("🔍   Skipping concept node: {}\n", .{edge.from});
                             }
+                        } else {
+                            std.debug.print("🔍   ❌ Source node {} not found\n", .{edge.from});
                         }
+                    } else {
+                        std.debug.print("🔍   Skipping edge with kind: {}\n", .{edge.kind});
                     }
                 }
+            } else {
+                std.debug.print("🔍 ❌ No incoming edges found for concept\n", .{});
             }
             
             if (found_count == 0) {
@@ -1472,6 +1490,24 @@ pub const McpServer = struct {
                 try content_list.appendSlice(summary);
             }
         } else {
+            std.debug.print("🔍 ❌ Concept node not found for: '{s}' (ID: {})\n", .{ concept_name, concept_id });
+            
+            // Debug: Show what concept nodes actually exist
+            std.debug.print("🔍 Available concept nodes:\n", .{});
+            var node_iter = self.db.graph_index.nodes.iterator();
+            var concept_count: u32 = 0;
+            while (node_iter.next()) |entry| {
+                const node_id = entry.key_ptr.*;
+                if (node_id >= 0x8000000000000000) {
+                    concept_count += 1;
+                    if (concept_count <= 10) { // Show first 10 concepts
+                        const node = entry.value_ptr.*;
+                        std.debug.print("🔍   Concept: '{s}' ({})\n", .{ node.getLabelAsString(), node_id });
+                    }
+                }
+            }
+            std.debug.print("🔍 Total concept nodes: {}\n", .{concept_count});
+            
             try content_list.appendSlice("Concept not found in memory database.");
         }
         

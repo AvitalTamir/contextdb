@@ -224,16 +224,23 @@ pub const SnapshotManager = struct {
     pub fn loadNodes(self: *SnapshotManager, snapshot_info: *const SnapshotInfo) !std.ArrayList(types.Node) {
         var nodes = std.ArrayList(types.Node).init(self.allocator);
         
-        for (snapshot_info.node_files.items) |node_file| {
+        std.debug.print("🔍 Loading nodes from {} files...\n", .{snapshot_info.node_files.items.len});
+        
+        for (snapshot_info.node_files.items, 0..) |node_file, i| {
             const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, node_file });
             defer self.allocator.free(file_path);
+            
+            std.debug.print("  📂 [{}/{}] Opening node file: {s}\n", .{ i + 1, snapshot_info.node_files.items.len, node_file });
             
             const file_nodes = try self.readNodeFile(file_path);
             defer file_nodes.deinit();
             
+            std.debug.print("  ✅ [{}/{}] Loaded {} nodes from {s}\n", .{ i + 1, snapshot_info.node_files.items.len, file_nodes.items.len, node_file });
+            
             try nodes.appendSlice(file_nodes.items);
         }
         
+        std.debug.print("✅ Total nodes loaded: {}\n", .{nodes.items.len});
         return nodes;
     }
 
@@ -241,16 +248,23 @@ pub const SnapshotManager = struct {
     pub fn loadEdges(self: *SnapshotManager, snapshot_info: *const SnapshotInfo) !std.ArrayList(types.Edge) {
         var edges = std.ArrayList(types.Edge).init(self.allocator);
         
-        for (snapshot_info.edge_files.items) |edge_file| {
+        std.debug.print("🔍 Loading edges from {} files...\n", .{snapshot_info.edge_files.items.len});
+        
+        for (snapshot_info.edge_files.items, 0..) |edge_file, i| {
             const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, edge_file });
             defer self.allocator.free(file_path);
+            
+            std.debug.print("  📂 [{}/{}] Opening edge file: {s}\n", .{ i + 1, snapshot_info.edge_files.items.len, edge_file });
             
             const file_edges = try self.readEdgeFile(file_path);
             defer file_edges.deinit();
             
+            std.debug.print("  ✅ [{}/{}] Loaded {} edges from {s}\n", .{ i + 1, snapshot_info.edge_files.items.len, file_edges.items.len, edge_file });
+            
             try edges.appendSlice(file_edges.items);
         }
         
+        std.debug.print("✅ Total edges loaded: {}\n", .{edges.items.len});
         return edges;
     }
 
@@ -258,16 +272,23 @@ pub const SnapshotManager = struct {
     pub fn loadMemoryContents(self: *SnapshotManager, snapshot_info: *const SnapshotInfo) !std.ArrayList(types.MemoryContent) {
         var memory_contents = std.ArrayList(types.MemoryContent).init(self.allocator);
         
-        for (snapshot_info.memory_content_files.items) |memory_file| {
+        std.debug.print("🔍 Loading memory contents from {} files...\n", .{snapshot_info.memory_content_files.items.len});
+        
+        for (snapshot_info.memory_content_files.items, 0..) |memory_file, i| {
             const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, memory_file });
             defer self.allocator.free(file_path);
+            
+            std.debug.print("  📂 [{}/{}] Opening memory file: {s}\n", .{ i + 1, snapshot_info.memory_content_files.items.len, memory_file });
             
             const file_memory_contents = try self.readMemoryContentFile(file_path);
             defer file_memory_contents.deinit(); // Only free the array list, not the content strings
             
+            std.debug.print("  ✅ [{}/{}] Loaded {} memory contents from {s}\n", .{ i + 1, snapshot_info.memory_content_files.items.len, file_memory_contents.items.len, memory_file });
+            
             try memory_contents.appendSlice(file_memory_contents.items);
         }
         
+        std.debug.print("✅ Total memory contents loaded: {}\n", .{memory_contents.items.len});
         return memory_contents;
     }
 
@@ -656,11 +677,15 @@ pub const SnapshotManager = struct {
     }
 
     fn readNodeFile(self: *SnapshotManager, file_path: []const u8) !std.ArrayList(types.Node) {
+        std.debug.print("    🔓 Opening node file: {s}\n", .{file_path});
+        
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
         const raw_content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
         defer self.allocator.free(raw_content);
+
+        std.debug.print("    📊 Read {} bytes from node file\n", .{raw_content.len});
 
         // Smart compression detection and handling
         var content: []const u8 = raw_content;
@@ -670,6 +695,7 @@ pub const SnapshotManager = struct {
         if (self.config.compression_enable) {
             // Check if the content is compressed by looking for JSON patterns
             if (!self.isLikelyJsonContent(raw_content)) {
+                std.debug.print("    🗜️  Content appears compressed, attempting decompression...\n", .{});
                 // Content appears to be compressed, try to decompress it
                 const comp_config = compression.CompressionConfig{
                     .enable_checksums = true,
@@ -681,7 +707,7 @@ pub const SnapshotManager = struct {
                 
                 // Read the header to get the original size
                 if (raw_content.len < @sizeOf(compression.BinaryCompressionHeader)) {
-                    std.debug.print("Node file too small to contain compression header\n", .{});
+                    std.debug.print("    ❌ Node file too small to contain compression header\n", .{});
                     content = raw_content;
                 } else {
                     const header_bytes = raw_content[0..@sizeOf(compression.BinaryCompressionHeader)];
@@ -700,29 +726,37 @@ pub const SnapshotManager = struct {
                         try decompressed_data.?.appendSlice(decompressed_bytes);
                         self.allocator.free(decompressed_bytes);
                         content = decompressed_data.?.items;
-                        std.debug.print("Successfully decompressed node file\n", .{});
+                        std.debug.print("    ✅ Successfully decompressed node file ({} -> {} bytes)\n", .{ raw_content.len, content.len });
                     } else |err| {
-                        std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                        std.debug.print("    ❌ Decompression failed: {}, trying to read as uncompressed\n", .{err});
                         content = raw_content;
                     }
                 }
             } else {
+                std.debug.print("    📄 Content looks like JSON, using as-is\n", .{});
                 // Content looks like JSON, use as-is
                 content = raw_content;
             }
         } else {
+            std.debug.print("    📄 Compression disabled, reading as uncompressed\n", .{});
             content = raw_content;
         }
 
-        return try self.parseNodesJson(content);
+        const result = try self.parseNodesJson(content);
+        std.debug.print("    ✅ Parsed {} nodes from file\n", .{result.items.len});
+        return result;
     }
 
     fn readEdgeFile(self: *SnapshotManager, file_path: []const u8) !std.ArrayList(types.Edge) {
+        std.debug.print("    🔓 Opening edge file: {s}\n", .{file_path});
+        
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
         const raw_content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
         defer self.allocator.free(raw_content);
+
+        std.debug.print("    📊 Read {} bytes from edge file\n", .{raw_content.len});
 
         // Smart compression detection and handling
         var content: []const u8 = raw_content;
@@ -732,6 +766,7 @@ pub const SnapshotManager = struct {
         if (self.config.compression_enable) {
             // Check if the content is compressed by looking for JSON patterns
             if (!self.isLikelyJsonContent(raw_content)) {
+                std.debug.print("    🗜️  Content appears compressed, attempting decompression...\n", .{});
                 // Content appears to be compressed, try to decompress it
                 const comp_config = compression.CompressionConfig{
                     .enable_checksums = true,
@@ -743,7 +778,7 @@ pub const SnapshotManager = struct {
                 
                 // Read the header to get the original size
                 if (raw_content.len < @sizeOf(compression.BinaryCompressionHeader)) {
-                    std.debug.print("Edge file too small to contain compression header\n", .{});
+                    std.debug.print("    ❌ Edge file too small to contain compression header\n", .{});
                     content = raw_content;
                 } else {
                     const header_bytes = raw_content[0..@sizeOf(compression.BinaryCompressionHeader)];
@@ -762,17 +797,19 @@ pub const SnapshotManager = struct {
                         try decompressed_data.?.appendSlice(decompressed_bytes);
                         self.allocator.free(decompressed_bytes);
                         content = decompressed_data.?.items;
-                        std.debug.print("Successfully decompressed edge file\n", .{});
+                        std.debug.print("    ✅ Successfully decompressed edge file ({} -> {} bytes)\n", .{ raw_content.len, content.len });
                     } else |err| {
-                        std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                        std.debug.print("    ❌ Decompression failed: {}, trying to read as uncompressed\n", .{err});
                         content = raw_content;
                     }
                 }
             } else {
+                std.debug.print("    📄 Content looks like JSON, using as-is\n", .{});
                 // Content looks like JSON, use as-is
                 content = raw_content;
             }
         } else {
+            std.debug.print("    📄 Compression disabled, reading as uncompressed\n", .{});
             content = raw_content;
         }
 
@@ -792,15 +829,20 @@ pub const SnapshotManager = struct {
             } else break;
         }
 
+        std.debug.print("    ✅ Parsed {} edges from file\n", .{edges.items.len});
         return edges;
     }
 
     pub fn readMemoryContentFile(self: *SnapshotManager, file_path: []const u8) !std.ArrayList(types.MemoryContent) {
+        std.debug.print("    🔓 Opening memory content file: {s}\n", .{file_path});
+        
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
         const raw_content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
         defer self.allocator.free(raw_content);
+
+        std.debug.print("    📊 Read {} bytes from memory content file\n", .{raw_content.len});
 
         // Smart compression detection and handling
         var content: []const u8 = raw_content;
@@ -810,6 +852,7 @@ pub const SnapshotManager = struct {
         if (self.config.compression_enable) {
             // Check if the content is compressed by looking for JSON patterns
             if (!self.isLikelyJsonContent(raw_content)) {
+                std.debug.print("    🗜️  Content appears compressed, attempting decompression...\n", .{});
                 // Content appears to be compressed, try to decompress it
                 const comp_config = compression.CompressionConfig{
                     .enable_checksums = true,
@@ -821,7 +864,7 @@ pub const SnapshotManager = struct {
                 
                 // Read the header to get the original size
                 if (raw_content.len < @sizeOf(compression.BinaryCompressionHeader)) {
-                    std.debug.print("Memory content file too small to contain compression header\n", .{});
+                    std.debug.print("    ❌ Memory content file too small to contain compression header\n", .{});
                     content = raw_content;
                 } else {
                     const header_bytes = raw_content[0..@sizeOf(compression.BinaryCompressionHeader)];
@@ -840,17 +883,19 @@ pub const SnapshotManager = struct {
                         try decompressed_data.?.appendSlice(decompressed_bytes);
                         self.allocator.free(decompressed_bytes);
                         content = decompressed_data.?.items;
-                        std.debug.print("Successfully decompressed memory content file\n", .{});
+                        std.debug.print("    ✅ Successfully decompressed memory content file ({} -> {} bytes)\n", .{ raw_content.len, content.len });
                     } else |err| {
-                        std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                        std.debug.print("    ❌ Decompression failed: {}, trying to read as uncompressed\n", .{err});
                         content = raw_content;
                     }
                 }
             } else {
+                std.debug.print("    📄 Content looks like JSON, using as-is\n", .{});
                 // Content looks like JSON, use as-is
                 content = raw_content;
             }
         } else {
+            std.debug.print("    📄 Compression disabled, reading as uncompressed\n", .{});
             content = raw_content;
         }
 
@@ -870,6 +915,7 @@ pub const SnapshotManager = struct {
             } else break;
         }
 
+        std.debug.print("    ✅ Parsed {} memory contents from file\n", .{memory_contents.items.len});
         return memory_contents;
     }
 

@@ -108,6 +108,16 @@ pub fn build(b: *std.Build) void {
     // Add the Memora module as a dependency for the monitoring tests
     monitoring_tests.root_module.addImport("memora", memora_module);
 
+    // Persistent index concept issue tests
+    const persistent_index_concept_tests = b.addTest(.{
+        .root_source_file = b.path("test/test_persistent_index_concept_issue.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Add the Memora module as a dependency for the persistent index concept tests
+    persistent_index_concept_tests.root_module.addImport("memora", memora_module);
+
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const run_hnsw_tests = b.addRunArtifact(hnsw_tests);
     const run_hnsw_basic_tests = b.addRunArtifact(hnsw_basic_tests);
@@ -116,6 +126,7 @@ pub fn build(b: *std.Build) void {
     const run_parallel_tests = b.addRunArtifact(parallel_tests);
     const run_persistent_index_tests = b.addRunArtifact(persistent_index_tests);
     const run_monitoring_tests = b.addRunArtifact(monitoring_tests);
+    const run_persistent_index_concept_tests = b.addRunArtifact(persistent_index_concept_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
@@ -140,6 +151,9 @@ pub fn build(b: *std.Build) void {
     
     const test_monitoring_step = b.step("test-monitoring", "Run monitoring tests");
     test_monitoring_step.dependOn(&run_monitoring_tests.step);
+    
+    const test_persistent_index_concept_step = b.step("test-persistent-index-concept", "Run persistent index concept issue tests");
+    test_persistent_index_concept_step.dependOn(&run_persistent_index_concept_tests.step);
     
     const test_raft_step = b.step("test-raft", "Run Raft consensus tests");
     const test_raft_exe = b.addTest(.{

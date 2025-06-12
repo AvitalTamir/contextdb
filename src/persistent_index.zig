@@ -221,6 +221,12 @@ pub const PersistentNodeIndex = struct {
     }
     
     pub fn create(self: *PersistentNodeIndex, nodes: []const types.Node) !void {
+        // Clean up existing mapped file if it exists
+        if (self.mapped_file) |*existing_file| {
+            existing_file.deinit();
+            self.mapped_file = null;
+        }
+        
         const header_size = @sizeOf(IndexFileHeader);
         // Ensure data offset is aligned for Node structure
         const node_alignment = @alignOf(types.Node);
@@ -332,6 +338,12 @@ pub const PersistentEdgeIndex = struct {
     }
     
     pub fn create(self: *PersistentEdgeIndex, edges: []const types.Edge) !void {
+        // Clean up existing mapped file if it exists
+        if (self.mapped_file) |*existing_file| {
+            existing_file.deinit();
+            self.mapped_file = null;
+        }
+        
         const header_size = @sizeOf(IndexFileHeader);
         // Ensure data offset is aligned for Edge structure
         const edge_alignment = @alignOf(types.Edge);
@@ -478,6 +490,12 @@ pub const PersistentVectorIndex = struct {
     }
     
     pub fn create(self: *PersistentVectorIndex, vectors: []const types.Vector) !void {
+        // Clean up existing mapped file if it exists
+        if (self.mapped_file) |*existing_file| {
+            existing_file.deinit();
+            self.mapped_file = null;
+        }
+        
         const header_size = @sizeOf(IndexFileHeader);
         // Ensure data offset is aligned for Vector structure
         const vector_alignment = @alignOf(types.Vector);

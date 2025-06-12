@@ -450,6 +450,12 @@ pub const Memora = struct {
 
         // Now we can safely clear the append log since memory content is preserved in snapshot files
         try self.append_log.clear();
+        
+        // CRITICAL FIX: Update persistent indexes after clearing log to keep them in sync
+        // This ensures that persistent index loading + log replay works correctly
+        if (self.persistent_index_manager.isEnabled()) {
+            try self.savePersistentIndexes();
+        }
 
         // Upload to S3 if configured
         if (self.s3_sync) |*s3_client| {
@@ -581,6 +587,8 @@ pub const Memora = struct {
     }
 
     fn loadFromSnapshot(self: *Memora, snapshot_info: *const snapshot.SnapshotInfo) !void {
+        std.debug.print("🔄 Loading from snapshot {}...\n", .{snapshot_info.snapshot_id});
+        
         // Clear existing indexes
         self.graph_index.deinit();
         self.vector_index.deinit();
@@ -588,57 +596,108 @@ pub const Memora = struct {
         self.graph_index = graph.GraphIndex.init(self.allocator);
         self.vector_index = vector.VectorIndex.init(self.allocator);
 
+        std.debug.print("📊 Snapshot contains: {} vector files, {} node files, {} edge files, {} memory files\n", .{
+            snapshot_info.vector_files.items.len,
+            snapshot_info.node_files.items.len,
+            snapshot_info.edge_files.items.len,
+            snapshot_info.memory_content_files.items.len,
+        });
+
         // Load vectors
+        std.debug.print("🔍 Loading vectors...\n", .{});
         const vectors = try self.snapshot_manager.loadVectors(snapshot_info);
         defer vectors.deinit();
         for (vectors.items) |vec| {
             try self.vector_index.addVector(vec);
         }
+        std.debug.print("✅ Loaded {} vectors into index\n", .{vectors.items.len});
 
         // Load nodes
         const nodes = try self.snapshot_manager.loadNodes(snapshot_info);
         defer nodes.deinit();
+        
+        var memory_node_count: u32 = 0;
+        var concept_node_count: u32 = 0;
+        
         for (nodes.items) |node| {
             try self.graph_index.addNode(node);
+            
+            if (node.id >= 0x8000000000000000) {
+                concept_node_count += 1;
+                if (concept_node_count <= 3) { // Show first 3 concept nodes
+                    std.debug.print("🔍   Loading concept node: {} (label: '{s}')\n", .{ node.id, node.getLabelAsString() });
+                }
+            } else {
+                memory_node_count += 1;
+                if (memory_node_count <= 3) { // Show first 3 memory nodes
+                    std.debug.print("🔍   Loading memory node: {} (label: '{s}')\n", .{ node.id, node.getLabelAsString() });
+                }
+            }
         }
+        std.debug.print("✅ Loaded {} nodes into graph index (memory: {}, concept: {})\n", .{ nodes.items.len, memory_node_count, concept_node_count });
 
         // Load edges
         const edges = try self.snapshot_manager.loadEdges(snapshot_info);
         defer edges.deinit();
+        
+        var concept_edge_count: u32 = 0;
+        
         for (edges.items) |edge| {
             try self.graph_index.addEdge(edge);
+            
+            if (edge.from >= 0x8000000000000000 or edge.to >= 0x8000000000000000) {
+                concept_edge_count += 1;
+                if (concept_edge_count <= 3) { // Show first 3 concept edges
+                    std.debug.print("🔍   Loading concept edge: {} -> {} (kind: {})\n", .{ edge.from, edge.to, edge.kind });
+                }
+            }
         }
+        std.debug.print("✅ Loaded {} edges into graph index (concept-related: {})\n", .{ edges.items.len, concept_edge_count });
 
+        std.debug.print("✅ Snapshot loading complete!\n", .{});
+        
         // Note: Memory contents are handled separately by MemoryManager
         // when it calls loadMemoryContentsFromSnapshot during its initialization
     }
 
     fn replayFromLog(self: *Memora) !void {
+        std.debug.print("🔄 Replaying entries from log...\n", .{});
+        
         var iter = self.append_log.iterator();
+        var node_count: u32 = 0;
+        var edge_count: u32 = 0;
+        var vector_count: u32 = 0;
+        var memory_count: u32 = 0;
         
         while (iter.next()) |entry| {
             switch (entry.getEntryType()) {
                 .node => {
                     if (entry.asNode()) |node| {
                         try self.graph_index.addNode(node);
+                        node_count += 1;
                     }
                 },
                 .edge => {
                     if (entry.asEdge()) |edge| {
                         try self.graph_index.addEdge(edge);
+                        edge_count += 1;
                     }
                 },
                 .vector => {
                     if (entry.asVector()) |vec| {
                         try self.vector_index.addVector(vec);
+                        vector_count += 1;
                     }
                 },
                 .memory_content => {
+                    memory_count += 1;
                     // Memory content entries are handled by MemoryManager during initialization
                     // We don't need to do anything here since content will be loaded on-demand
                 },
             }
         }
+        
+        std.debug.print("✅ Replayed from log: {} nodes, {} edges, {} vectors, {} memory entries\n", .{ node_count, edge_count, vector_count, memory_count });
     }
 
     pub fn getAllVectors(self: *Memora) !std.ArrayList(types.Vector) {

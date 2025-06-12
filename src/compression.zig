@@ -253,7 +253,7 @@ pub const CompressionEngine = struct {
         
         // Handle case where compression makes data larger (avoid integer underflow)
         if (data.len >= compressed_data.len) {
-            self.stats.total_bytes_saved += data.len - compressed_data.len;
+        self.stats.total_bytes_saved += data.len - compressed_data.len;
         }
         // If compression made data larger, we don't add to bytes_saved (it would be negative)
         
