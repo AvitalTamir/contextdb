@@ -230,6 +230,66 @@ pub fn build(b: *std.Build) void {
     const test_compression_run = b.addRunArtifact(test_compression_exe);
     test_compression_step.dependOn(&test_compression_run.step);
 
+    // Comprehensive compression test
+    const test_comprehensive_compression_step = b.step("test-comprehensive-compression", "Test compression for all data types (nodes, edges, memory)");
+    const test_comprehensive_compression_exe = b.addExecutable(.{
+        .name = "test_comprehensive_compression",
+        .root_source_file = b.path("test/test_comprehensive_compression.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_comprehensive_compression_exe.root_module.addImport("memora", memora_module);
+    const test_comprehensive_compression_run = b.addRunArtifact(test_comprehensive_compression_exe);
+    test_comprehensive_compression_step.dependOn(&test_comprehensive_compression_run.step);
+
+    // Compression debug test
+    const test_compression_debug_step = b.step("test-compression-debug", "Debug compression/decompression content");
+    const test_compression_debug_exe = b.addExecutable(.{
+        .name = "test_compression_debug",
+        .root_source_file = b.path("test/test_compression_debug.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_compression_debug_exe.root_module.addImport("memora", memora_module);
+    const test_compression_debug_run = b.addRunArtifact(test_compression_debug_exe);
+    test_compression_debug_step.dependOn(&test_compression_debug_run.step);
+
+    // Uncompressed format test
+    const test_uncompressed_format_step = b.step("test-uncompressed-format", "Test uncompressed JSON format");
+    const test_uncompressed_format_exe = b.addExecutable(.{
+        .name = "test_uncompressed_format",
+        .root_source_file = b.path("test/test_uncompressed_format.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_uncompressed_format_exe.root_module.addImport("memora", memora_module);
+    const test_uncompressed_format_run = b.addRunArtifact(test_uncompressed_format_exe);
+    test_uncompressed_format_step.dependOn(&test_uncompressed_format_run.step);
+
+    // Detailed compression debug test
+    const test_detailed_debug_step = b.step("test-detailed-debug", "Detailed debug of compression/decompression");
+    const test_detailed_debug_exe = b.addExecutable(.{
+        .name = "test_detailed_debug",
+        .root_source_file = b.path("test/test_compression_detailed_debug.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_detailed_debug_exe.root_module.addImport("memora", memora_module);
+    const test_detailed_debug_run = b.addRunArtifact(test_detailed_debug_exe);
+    test_detailed_debug_step.dependOn(&test_detailed_debug_run.step);
+
+    // Compression fix verification test
+    const test_compression_fix_step = b.step("test-compression-fix", "Verify compression fix for nodes, edges, and memory");
+    const test_compression_fix_exe = b.addExecutable(.{
+        .name = "test_compression_fix_verification",
+        .root_source_file = b.path("test/test_compression_fix_verification.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_compression_fix_exe.root_module.addImport("memora", memora_module);
+    const test_compression_fix_run = b.addRunArtifact(test_compression_fix_exe);
+    test_compression_fix_step.dependOn(&test_compression_fix_run.step);
+
     // Fuzzing campaign runner
     const fuzz_runner_step = b.step("fuzz", "Run Memora fuzzing campaigns");
     const fuzz_runner_exe = b.addExecutable(.{
@@ -461,4 +521,40 @@ pub fn build(b: *std.Build) void {
     const vector_fix_cmd = b.addRunArtifact(vector_fix_test);
     const vector_fix_step = b.step("test-vector-fix", "Test vector embedding fix for MCP server");
     vector_fix_step.dependOn(&vector_fix_cmd.step);
+
+    // Test memory content flush from cache to snapshots
+    const memory_flush_test = b.addTest(.{
+        .root_source_file = b.path("test/test_memory_flush.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    memory_flush_test.root_module.addImport("memora", memora_module);
+
+    const memory_flush_cmd = b.addRunArtifact(memory_flush_test);
+    const memory_flush_step = b.step("test-memory-flush", "Test memory content flush from cache to snapshots");
+    memory_flush_step.dependOn(&memory_flush_cmd.step);
+
+    // Test complete memory restoration (content + vector embeddings)
+    const complete_restoration_test = b.addTest(.{
+        .root_source_file = b.path("test/test_complete_memory_restoration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    complete_restoration_test.root_module.addImport("memora", memora_module);
+
+    const complete_restoration_cmd = b.addRunArtifact(complete_restoration_test);
+    const complete_restoration_step = b.step("test-complete-restoration", "Test complete memory restoration with vector embeddings");
+    complete_restoration_step.dependOn(&complete_restoration_cmd.step);
+
+    // Test concept persistence across MCP server restarts
+    const concept_persistence_test = b.addTest(.{
+        .root_source_file = b.path("test/test_concept_persistence_fix.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    concept_persistence_test.root_module.addImport("memora", memora_module);
+
+    const concept_persistence_cmd = b.addRunArtifact(concept_persistence_test);
+    const concept_persistence_step = b.step("test-concept-persistence", "Test concept persistence across MCP server restarts");
+    concept_persistence_step.dependOn(&concept_persistence_cmd.step);
 } 

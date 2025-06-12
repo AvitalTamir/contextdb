@@ -169,6 +169,13 @@ pub const McpServer = struct {
     }
     
     pub fn deinit(self: *Self) void {
+        // Create final snapshot with MemoryManager to ensure concepts and relationships are persisted
+        if (self.createSnapshotWithMemoryManager()) |snapshot_info| {
+            snapshot_info.deinit();
+        } else |err| {
+            std.debug.print("Warning: Failed to create final snapshot with MemoryManager: {}\n", .{err});
+        }
+        
         self.memory_manager.deinit();
     }
     
@@ -900,7 +907,7 @@ pub const McpServer = struct {
     
     /// Extract concepts from memory text
     /// This is a simple implementation - in production would use NLP/NER
-    fn extractConcepts(self: *Self, text: []const u8) !std.ArrayList([]const u8) {
+    pub fn extractConcepts(self: *Self, text: []const u8) !std.ArrayList([]const u8) {
         var concepts = std.ArrayList([]const u8).init(self.allocator);
         
         // Simple concept extraction: split on whitespace and filter meaningful words
@@ -954,7 +961,7 @@ pub const McpServer = struct {
     }
     
     /// Generate a deterministic ID for a concept based on its text
-    fn generateConceptId(self: *Self, concept: []const u8) u64 {
+    pub fn generateConceptId(self: *Self, concept: []const u8) u64 {
         _ = self; // unused
         
         // Use a hash function to generate deterministic IDs for concepts
@@ -1944,42 +1951,6 @@ pub const McpServer = struct {
 
     /// Create a snapshot using MemoryManager's cache for proper memory content persistence
     pub fn createSnapshotWithMemoryManager(self: *Self) !main.snapshot.SnapshotInfo {
-        // Sync log to disk first
-        try self.db.append_log.sync();
-
-        // Extract current data
-        const vectors = try self.db.getAllVectors();
-        defer vectors.deinit();
-        
-        const nodes = try self.db.getAllNodes();
-        defer nodes.deinit();
-        
-        const edges = try self.db.getAllEdges();
-        defer edges.deinit();
-        
-        // Get memory contents from MemoryManager's cache (not just the log)
-        const memory_contents = try self.db.getAllMemoryContentFromManager(&self.memory_manager);
-        defer {
-            // Free the allocated content strings
-            for (memory_contents.items) |memory_content| {
-                self.allocator.free(memory_content.content);
-            }
-            memory_contents.deinit();
-        }
-
-        // Create snapshot with memory contents included
-        const snapshot_info = try self.db.snapshot_manager.createSnapshot(vectors.items, nodes.items, edges.items, memory_contents.items);
-
-        // Now we can safely clear the append log since memory content is preserved in snapshot files
-        try self.db.append_log.clear();
-
-        // Upload to S3 if configured
-        if (self.db.s3_sync) |*s3_client| {
-            if (self.db.config.s3_prefix) |prefix| {
-                try s3_client.uploadSnapshot(self.db.config.data_path, snapshot_info.snapshot_id, prefix);
-            }
-        }
-
-        return snapshot_info;
+        return self.db.createSnapshotWithMemoryManager(&self.memory_manager);
     }
 }; 

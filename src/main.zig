@@ -157,6 +157,11 @@ pub const Memora = struct {
 
     /// Create a final snapshot before shutdown (if needed)
     fn createFinalSnapshot(self: *Memora) !void {
+        return self.createFinalSnapshotWithMemoryManager(null);
+    }
+
+    /// Create a final snapshot before shutdown with optional MemoryManager
+    fn createFinalSnapshotWithMemoryManager(self: *Memora, mem_manager: ?*memory_manager.MemoryManager) !void {
         // Only create snapshot if there are entries in the log
         const current_entries = self.append_log.getEntryCount();
         if (current_entries > 0) {
@@ -174,12 +179,19 @@ pub const Memora = struct {
                 },
             };
             
-            var snapshot_info = self.createSnapshot() catch |err| {
+            // Use MemoryManager-aware snapshot creation if available
+            var snapshot_info = if (mem_manager) |mgr|
+                self.createSnapshotWithMemoryManager(mgr)
+            else
+                self.createSnapshot();
+            
+            if (snapshot_info) |*info| {
+                defer info.deinit();
+                std.debug.print("Final snapshot created successfully\n", .{});
+            } else |err| {
                 std.debug.print("Warning: Failed to create final snapshot: {}\n", .{err});
                 return;
-            };
-            defer snapshot_info.deinit();
-            std.debug.print("Final snapshot created successfully\n", .{});
+            }
         }
     }
 
@@ -402,6 +414,11 @@ pub const Memora = struct {
 
     /// Create a snapshot manually
     pub fn createSnapshot(self: *Memora) !snapshot.SnapshotInfo {
+        return self.createSnapshotWithMemoryManager(null);
+    }
+
+    /// Create a snapshot, optionally using MemoryManager's cache for complete memory content
+    pub fn createSnapshotWithMemoryManager(self: *Memora, mem_manager: ?*memory_manager.MemoryManager) !snapshot.SnapshotInfo {
         // Sync log to disk first
         try self.append_log.sync();
 
@@ -415,7 +432,11 @@ pub const Memora = struct {
         const edges = try self.getAllEdges();
         defer edges.deinit();
         
-        const memory_contents = try self.getAllMemoryContent();
+        // Get memory contents - use MemoryManager's cache if available, otherwise fall back to log
+        const memory_contents = if (mem_manager) |mgr|
+            try self.getAllMemoryContentFromManager(mgr)
+        else
+            try self.getAllMemoryContent();
         defer {
             // Free the allocated content strings
             for (memory_contents.items) |memory_content| {

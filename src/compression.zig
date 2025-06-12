@@ -376,7 +376,7 @@ const VectorCompressionHeader = packed struct {
 };
 
 /// Binary compression header
-const BinaryCompressionHeader = packed struct {
+pub const BinaryCompressionHeader = packed struct {
     magic: u32, // "BINC"
     version: u16,
     method: CompressionMethod,

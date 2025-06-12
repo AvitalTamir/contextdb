@@ -502,7 +502,7 @@ pub const MemoryManager = struct {
         return null;
     }
 
-    fn generateEmbedding(self: *Self, content: []const u8) !([128]f32) {
+    pub fn generateEmbedding(self: *Self, content: []const u8) !([128]f32) {
         _ = self;
         
         // Simplified embedding generation for now
@@ -586,6 +586,16 @@ pub const MemoryManager = struct {
                                 try self.memora.insertNode(node);
                                 
                                 std.debug.print("  Recreated node {} in graph index\n", .{memory_content.memory_id});
+                            }
+                            
+                            // CRITICAL FIX: Also recreate vector embedding if it doesn't exist
+                            if (self.memora.vector_index.getVector(memory_content.memory_id) == null) {
+                                const embedding = try self.generateEmbedding(memory_content.content);
+                                const vector = types.Vector.init(memory_content.memory_id, &embedding);
+                                try self.memora.insertVector(vector);
+                                try self.embedding_cache.put(memory_content.memory_id, embedding);
+                                
+                                std.debug.print("  Recreated vector embedding {} for semantic search\n", .{memory_content.memory_id});
                             }
                         }
                         max_memory_id = @max(max_memory_id, memory_content.memory_id);
@@ -673,6 +683,16 @@ pub const MemoryManager = struct {
                                 try self.memora.insertNode(node);
                                 
                                 std.debug.print("  Recreated node {} from orphaned file\n", .{memory_content.memory_id});
+                            }
+                            
+                            // CRITICAL FIX: Also recreate vector embedding if it doesn't exist
+                            if (self.memora.vector_index.getVector(memory_content.memory_id) == null) {
+                                const embedding = try self.generateEmbedding(memory_content.content);
+                                const vector = types.Vector.init(memory_content.memory_id, &embedding);
+                                try self.memora.insertVector(vector);
+                                try self.embedding_cache.put(memory_content.memory_id, embedding);
+                                
+                                std.debug.print("  Recreated vector embedding {} from orphaned file\n", .{memory_content.memory_id});
                             }
                         }
                         max_memory_id = @max(max_memory_id, memory_content.memory_id);

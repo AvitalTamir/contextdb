@@ -1,0 +1,9 @@
+{
+  "snapshot_id": 2,
+  "timestamp": "2025-01-13T00:00:00Z",
+  "vector_files": [],
+  "node_files": ["nodes/node-000002.json"],
+  "edge_files": ["edges/edge-000002.json"],
+  "memory_content_files": [],
+  "counts": {"vectors": 0, "nodes": 1, "edges": 1, "memory_contents": 0}
+}

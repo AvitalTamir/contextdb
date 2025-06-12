@@ -399,40 +399,98 @@ pub const SnapshotManager = struct {
         const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, relative_path });
         defer self.allocator.free(file_path);
 
-        const file = try std.fs.cwd().createFile(file_path, .{});
-        defer file.close();
-
-        // Write as JSON array
-        try file.writeAll("[\n");
+        // Build JSON content in memory first
+        var json_content = std.ArrayList(u8).init(self.allocator);
+        defer json_content.deinit();
+        
+        try json_content.appendSlice("[\n");
         for (nodes, 0..) |node, i| {
-            if (i > 0) try file.writeAll(",\n");
+            if (i > 0) try json_content.appendSlice(",\n");
             
             const json_line = try std.fmt.allocPrint(self.allocator, "  {{\"id\": {}, \"label\": \"{s}\"}}", .{ node.id, node.getLabelAsString() });
             defer self.allocator.free(json_line);
             
-            try file.writeAll(json_line);
+            try json_content.appendSlice(json_line);
         }
-        try file.writeAll("\n]\n");
+        try json_content.appendSlice("\n]\n");
+
+        const file = try std.fs.cwd().createFile(file_path, .{});
+        defer file.close();
+
+        // Apply compression if enabled
+        if (self.config.compression_enable) {
+            // Initialize compression engine
+            const comp_config = compression.CompressionConfig{
+                .enable_checksums = true,
+                .compression_level = 6,
+                .rle_min_run_length = 3,
+            };
+            var comp_engine = compression.CompressionEngine.init(self.allocator, comp_config);
+            defer comp_engine.deinit();
+            
+            // Compress the JSON content
+            var compressed_data = comp_engine.compressBinary(json_content.items) catch |err| {
+                std.debug.print("Compression failed: {}, writing uncompressed\n", .{err});
+                try file.writeAll(json_content.items);
+                return;
+            };
+            defer compressed_data.deinit(self.allocator);
+            
+            // Write compressed data
+            try file.writeAll(compressed_data.compressed_data);
+            std.debug.print("Compressed node data: {:.1}% reduction\n", .{(1.0 - compressed_data.compression_ratio) * 100.0});
+        } else {
+            try file.writeAll(json_content.items);
+        }
     }
 
     fn writeEdgeFile(self: *SnapshotManager, relative_path: []const u8, edges: []const types.Edge) !void {
         const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, relative_path });
         defer self.allocator.free(file_path);
 
-        const file = try std.fs.cwd().createFile(file_path, .{});
-        defer file.close();
-
-        // Write as JSON array
-        try file.writeAll("[\n");
+        // Build JSON content in memory first
+        var json_content = std.ArrayList(u8).init(self.allocator);
+        defer json_content.deinit();
+        
+        try json_content.appendSlice("[\n");
         for (edges, 0..) |edge, i| {
-            if (i > 0) try file.writeAll(",\n");
+            if (i > 0) try json_content.appendSlice(",\n");
             
             const json_line = try std.fmt.allocPrint(self.allocator, "  {{\"from\": {}, \"to\": {}, \"kind\": {}}}", .{ edge.from, edge.to, edge.kind });
             defer self.allocator.free(json_line);
             
-            try file.writeAll(json_line);
+            try json_content.appendSlice(json_line);
         }
-        try file.writeAll("\n]\n");
+        try json_content.appendSlice("\n]\n");
+
+        const file = try std.fs.cwd().createFile(file_path, .{});
+        defer file.close();
+
+        // Apply compression if enabled
+        if (self.config.compression_enable) {
+            // Initialize compression engine
+            const comp_config = compression.CompressionConfig{
+                .enable_checksums = true,
+                .compression_level = 6,
+                .rle_min_run_length = 3,
+            };
+            var comp_engine = compression.CompressionEngine.init(self.allocator, comp_config);
+            defer comp_engine.deinit();
+            
+            // Compress the JSON content
+            var compressed_data = comp_engine.compressBinary(json_content.items) catch |err| {
+                std.debug.print("Compression failed: {}, writing uncompressed\n", .{err});
+                try file.writeAll(json_content.items);
+                return;
+            };
+            defer compressed_data.deinit(self.allocator);
+            
+            // Write compressed data
+            try file.writeAll(compressed_data.compressed_data);
+            std.debug.print("Compressed edge data: {:.1}% reduction\n", .{(1.0 - compressed_data.compression_ratio) * 100.0});
+        } else {
+            try file.writeAll(json_content.items);
+        }
     }
 
     fn writeMemoryContentFile(self: *SnapshotManager, relative_path: []const u8, memory_contents: []const types.MemoryContent) !void {
@@ -601,8 +659,60 @@ pub const SnapshotManager = struct {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
-        const content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
-        defer self.allocator.free(content);
+        const raw_content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
+        defer self.allocator.free(raw_content);
+
+        // Smart compression detection and handling
+        var content: []const u8 = raw_content;
+        var decompressed_data: ?std.ArrayList(u8) = null;
+        defer if (decompressed_data) |*data| data.deinit();
+        
+        if (self.config.compression_enable) {
+            // Check if the content is compressed by looking for JSON patterns
+            if (!self.isLikelyJsonContent(raw_content)) {
+                // Content appears to be compressed, try to decompress it
+                const comp_config = compression.CompressionConfig{
+                    .enable_checksums = true,
+                    .compression_level = 6,
+                    .rle_min_run_length = 3,
+                };
+                var comp_engine = compression.CompressionEngine.init(self.allocator, comp_config);
+                defer comp_engine.deinit();
+                
+                // Read the header to get the original size
+                if (raw_content.len < @sizeOf(compression.BinaryCompressionHeader)) {
+                    std.debug.print("Node file too small to contain compression header\n", .{});
+                    content = raw_content;
+                } else {
+                    const header_bytes = raw_content[0..@sizeOf(compression.BinaryCompressionHeader)];
+                    const header = std.mem.bytesToValue(compression.BinaryCompressionHeader, header_bytes);
+                    
+                    // Create a temporary CompressedBinaryData structure
+                    const compressed_binary = compression.CompressedBinaryData{
+                        .compressed_data = @constCast(raw_content),
+                        .original_size = header.original_size,
+                        .compression_method = header.method,
+                        .compression_ratio = 1.0,
+                    };
+                    
+                    if (comp_engine.decompressBinary(&compressed_binary)) |decompressed_bytes| {
+                        decompressed_data = std.ArrayList(u8).init(self.allocator);
+                        try decompressed_data.?.appendSlice(decompressed_bytes);
+                        self.allocator.free(decompressed_bytes);
+                        content = decompressed_data.?.items;
+                        std.debug.print("Successfully decompressed node file\n", .{});
+                    } else |err| {
+                        std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                        content = raw_content;
+                    }
+                }
+            } else {
+                // Content looks like JSON, use as-is
+                content = raw_content;
+            }
+        } else {
+            content = raw_content;
+        }
 
         return try self.parseNodesJson(content);
     }
@@ -611,8 +721,60 @@ pub const SnapshotManager = struct {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
-        const content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
-        defer self.allocator.free(content);
+        const raw_content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
+        defer self.allocator.free(raw_content);
+
+        // Smart compression detection and handling
+        var content: []const u8 = raw_content;
+        var decompressed_data: ?std.ArrayList(u8) = null;
+        defer if (decompressed_data) |*data| data.deinit();
+        
+        if (self.config.compression_enable) {
+            // Check if the content is compressed by looking for JSON patterns
+            if (!self.isLikelyJsonContent(raw_content)) {
+                // Content appears to be compressed, try to decompress it
+                const comp_config = compression.CompressionConfig{
+                    .enable_checksums = true,
+                    .compression_level = 6,
+                    .rle_min_run_length = 3,
+                };
+                var comp_engine = compression.CompressionEngine.init(self.allocator, comp_config);
+                defer comp_engine.deinit();
+                
+                // Read the header to get the original size
+                if (raw_content.len < @sizeOf(compression.BinaryCompressionHeader)) {
+                    std.debug.print("Edge file too small to contain compression header\n", .{});
+                    content = raw_content;
+                } else {
+                    const header_bytes = raw_content[0..@sizeOf(compression.BinaryCompressionHeader)];
+                    const header = std.mem.bytesToValue(compression.BinaryCompressionHeader, header_bytes);
+                    
+                    // Create a temporary CompressedBinaryData structure
+                    const compressed_binary = compression.CompressedBinaryData{
+                        .compressed_data = @constCast(raw_content),
+                        .original_size = header.original_size,
+                        .compression_method = header.method,
+                        .compression_ratio = 1.0,
+                    };
+                    
+                    if (comp_engine.decompressBinary(&compressed_binary)) |decompressed_bytes| {
+                        decompressed_data = std.ArrayList(u8).init(self.allocator);
+                        try decompressed_data.?.appendSlice(decompressed_bytes);
+                        self.allocator.free(decompressed_bytes);
+                        content = decompressed_data.?.items;
+                        std.debug.print("Successfully decompressed edge file\n", .{});
+                    } else |err| {
+                        std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                        content = raw_content;
+                    }
+                }
+            } else {
+                // Content looks like JSON, use as-is
+                content = raw_content;
+            }
+        } else {
+            content = raw_content;
+        }
 
         var edges = std.ArrayList(types.Edge).init(self.allocator);
 
@@ -657,23 +819,32 @@ pub const SnapshotManager = struct {
                 var comp_engine = compression.CompressionEngine.init(self.allocator, comp_config);
                 defer comp_engine.deinit();
                 
-                // Create a temporary CompressedBinaryData structure
-                const compressed_binary = compression.CompressedBinaryData{
-                    .compressed_data = @constCast(raw_content),
-                    .original_size = 0, // Will be read from header
-                    .compression_method = .lz4_fast,
-                    .compression_ratio = 1.0,
-                };
-                
-                if (comp_engine.decompressBinary(&compressed_binary)) |decompressed_bytes| {
-                    decompressed_data = std.ArrayList(u8).init(self.allocator);
-                    try decompressed_data.?.appendSlice(decompressed_bytes);
-                    self.allocator.free(decompressed_bytes);
-                    content = decompressed_data.?.items;
-                    std.debug.print("Successfully decompressed memory content file\n", .{});
-                } else |err| {
-                    std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                // Read the header to get the original size
+                if (raw_content.len < @sizeOf(compression.BinaryCompressionHeader)) {
+                    std.debug.print("Memory content file too small to contain compression header\n", .{});
                     content = raw_content;
+                } else {
+                    const header_bytes = raw_content[0..@sizeOf(compression.BinaryCompressionHeader)];
+                    const header = std.mem.bytesToValue(compression.BinaryCompressionHeader, header_bytes);
+                    
+                    // Create a temporary CompressedBinaryData structure
+                    const compressed_binary = compression.CompressedBinaryData{
+                        .compressed_data = @constCast(raw_content),
+                        .original_size = header.original_size,
+                        .compression_method = header.method,
+                        .compression_ratio = 1.0,
+                    };
+                    
+                    if (comp_engine.decompressBinary(&compressed_binary)) |decompressed_bytes| {
+                        decompressed_data = std.ArrayList(u8).init(self.allocator);
+                        try decompressed_data.?.appendSlice(decompressed_bytes);
+                        self.allocator.free(decompressed_bytes);
+                        content = decompressed_data.?.items;
+                        std.debug.print("Successfully decompressed memory content file\n", .{});
+                    } else |err| {
+                        std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                        content = raw_content;
+                    }
                 }
             } else {
                 // Content looks like JSON, use as-is
@@ -703,7 +874,7 @@ pub const SnapshotManager = struct {
     }
 
     /// Check if content looks like JSON (simple heuristic)
-    fn isLikelyJsonContent(self: *SnapshotManager, content: []const u8) bool {
+    pub fn isLikelyJsonContent(self: *SnapshotManager, content: []const u8) bool {
         _ = self;
         if (content.len == 0) return false;
         
@@ -808,7 +979,7 @@ pub const SnapshotManager = struct {
         }
     }
 
-    fn parseNodesJson(self: *SnapshotManager, json_content: []const u8) !std.ArrayList(types.Node) {
+    pub fn parseNodesJson(self: *SnapshotManager, json_content: []const u8) !std.ArrayList(types.Node) {
         var nodes = std.ArrayList(types.Node).init(self.allocator);
         
         // Simple JSON parsing - extract id and label pairs
