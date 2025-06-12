@@ -389,7 +389,7 @@ pub const Memora = struct {
         // Create snapshot with memory contents included
         const snapshot_info = try self.snapshot_manager.createSnapshot(vectors.items, nodes.items, edges.items, memory_contents.items);
 
-        // Now we can safely clear the append log since memory content is preserved in snapshot
+        // Now we can safely clear the append log since memory content is preserved in snapshot files
         try self.append_log.clear();
 
         // Upload to S3 if configured
@@ -497,12 +497,6 @@ pub const Memora = struct {
                 var snapshot_info = try self.createSnapshot();
                 defer snapshot_info.deinit();
                 
-                // DO NOT clear the log after successful snapshot since it contains memory_content entries
-                // that are not included in snapshots. This preserves full memory content for MemoryManager.
-                // if (self.append_log.config.snapshot_auto_clear_log) {
-                //     try self.append_log.clear();
-                // }
-                
                 // Auto cleanup if enabled
                 if (self.snapshot_manager.config.cleanup_auto_enable) {
                     _ = try self.snapshot_manager.cleanup(self.snapshot_manager.config.cleanup_keep_count);
@@ -588,7 +582,7 @@ pub const Memora = struct {
         }
     }
 
-    fn getAllVectors(self: *Memora) !std.ArrayList(types.Vector) {
+    pub fn getAllVectors(self: *Memora) !std.ArrayList(types.Vector) {
         var vectors = std.ArrayList(types.Vector).init(self.allocator);
         
         for (self.vector_index.vector_list.items) |vec| {
@@ -598,7 +592,7 @@ pub const Memora = struct {
         return vectors;
     }
 
-    fn getAllNodes(self: *Memora) !std.ArrayList(types.Node) {
+    pub fn getAllNodes(self: *Memora) !std.ArrayList(types.Node) {
         var nodes = std.ArrayList(types.Node).init(self.allocator);
         
         var iter = self.graph_index.nodes.iterator();
@@ -623,10 +617,34 @@ pub const Memora = struct {
         return edges;
     }
 
-    /// Get all memory content from the append log
+    /// Get all memory content from the MemoryManager's cache for snapshot creation
+    pub fn getAllMemoryContentFromManager(self: *Memora, mem_manager: *memory_manager.MemoryManager) !std.ArrayList(types.MemoryContent) {
+        var memory_contents = std.ArrayList(types.MemoryContent).init(self.allocator);
+        
+        // Get memory content from MemoryManager's in-memory cache
+        var content_iter = mem_manager.memory_content.iterator();
+        while (content_iter.next()) |entry| {
+            const memory_id = entry.key_ptr.*;
+            const content = entry.value_ptr.*;
+            
+            // Allocate a copy of the content for the snapshot
+            const content_copy = try self.allocator.dupe(u8, content);
+            const memory_content = types.MemoryContent{
+                .memory_id = memory_id,
+                .content = content_copy,
+            };
+            try memory_contents.append(memory_content);
+        }
+        
+        return memory_contents;
+    }
+
+    /// Get all memory content from the MemoryManager's cache (not just the log)
     pub fn getAllMemoryContent(self: *Memora) !std.ArrayList(types.MemoryContent) {
         var memory_contents = std.ArrayList(types.MemoryContent).init(self.allocator);
         
+        // This is a fallback method when MemoryManager is not available
+        // Get from log as backup
         var iter = self.append_log.iterator();
         while (iter.next()) |entry| {
             if (entry.getEntryType() == .memory_content) {

@@ -665,25 +665,25 @@ pub const SnapshotManager = struct {
         _ = self; // Mark unused
         var edge = types.Edge{ .from = 0, .to = 0, .kind = 0 };
         var parts = std.mem.splitScalar(u8, json_str, ',');
-        while (parts.next()) |part| {
-            const trimmed_part = std.mem.trim(u8, part, " {}");
-            if (std.mem.indexOf(u8, trimmed_part, "\"from\":")) |_| {
-                if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
-                    const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
+                while (parts.next()) |part| {
+                    const trimmed_part = std.mem.trim(u8, part, " {}");
+                    if (std.mem.indexOf(u8, trimmed_part, "\"from\":")) |_| {
+                        if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
+                            const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
                     edge.from = std.fmt.parseInt(u64, value_str, 10) catch 0;
-                }
-            } else if (std.mem.indexOf(u8, trimmed_part, "\"to\":")) |_| {
-                if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
-                    const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
+                        }
+                    } else if (std.mem.indexOf(u8, trimmed_part, "\"to\":")) |_| {
+                        if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
+                            const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
                     edge.to = std.fmt.parseInt(u64, value_str, 10) catch 0;
-                }
-            } else if (std.mem.indexOf(u8, trimmed_part, "\"kind\":")) |_| {
-                if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
-                    const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
+                        }
+                    } else if (std.mem.indexOf(u8, trimmed_part, "\"kind\":")) |_| {
+                        if (std.mem.indexOf(u8, trimmed_part, ":")) |colon_idx| {
+                            const value_str = std.mem.trim(u8, trimmed_part[colon_idx + 1 ..], " ");
                     edge.kind = std.fmt.parseInt(u8, value_str, 10) catch 0;
+                        }
+                    }
                 }
-            }
-        }
         return edge;
     }
 
@@ -731,9 +731,9 @@ pub const SnapshotManager = struct {
                         } else {
                             try unescaped_content.append(content_str[i]);
                             i += 1;
-                        }
-                    }
-                    
+            }
+        }
+        
                     const final_content = try self.allocator.dupe(u8, unescaped_content.items);
                     return types.MemoryContent{ .memory_id = memory_id, .content = final_content };
                 }

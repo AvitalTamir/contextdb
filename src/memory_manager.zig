@@ -185,7 +185,11 @@ pub const MemoryManager = struct {
             }
         }
         
-        const final_content = content orelse return null;
+        // If we still don't have content, this memory is corrupted/incomplete
+        const final_content = content orelse {
+            std.debug.print("Warning: Memory {} exists as node but has no content - data may be corrupted\n", .{memory_id});
+            return null; // Return null instead of creating placeholder content
+        };
         
         // Reconstruct memory
         var memory = Memory.fromNode(node, final_content);
@@ -586,16 +590,16 @@ pub const MemoryManager = struct {
             }
         }
         
-        // Final pass: reconstruct content for memory nodes that exist but don't have content entries
-        // This handles the case where snapshots were created and log was cleared
-        try self.loadMemoriesFromLoadedNodes(max_memory_id);
+        // DO NOT create placeholder content for nodes without memory content entries
+        // This was causing the "[Recovered memory ID ...]" problem
+        // If a memory node exists but has no content, it means the data was lost and should not be recovered with placeholders
         
         // Set the next memory ID to be one higher than the maximum found
         if (max_memory_id > 0) {
             self.next_memory_id = max_memory_id + 1;
         }
         
-        std.debug.print("Loaded {} total memories from all snapshots, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
+        std.debug.print("Loaded {} total memories from snapshots and log, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
     }
     
     /// Load memory contents from snapshot data during database restoration
@@ -622,32 +626,6 @@ pub const MemoryManager = struct {
         }
         
         std.debug.print("Loaded {} memory contents from snapshot, next ID: {}\n", .{ memory_contents.len, self.next_memory_id });
-    }
-    
-    /// Reconstruct memory content from nodes that were loaded from snapshots
-    /// but don't have corresponding memory_content entries in the log
-    fn loadMemoriesFromLoadedNodes(self: *Self, max_memory_id: u64) !void {
-        _ = max_memory_id; // Mark unused
-        var node_iter = self.memora.graph_index.nodes.iterator();
-        
-        while (node_iter.next()) |entry| {
-            const node = entry.value_ptr.*;
-            const node_id = node.id;
-            
-            // Skip if we already have content for this memory ID
-            if (self.memory_content.contains(node_id)) continue;
-            
-            // Check if this looks like a memory node by examining the label structure
-            // Memory nodes have structured metadata in their label
-            if (node.label[0] < 10 and node.label[1] < 5 and node.label[2] < 5 and node.label[3] < 6) {
-                // This looks like a memory node - create a placeholder content string
-                // since we can't recover the full original content from snapshots
-                const placeholder_content = try std.fmt.allocPrint(self.allocator, "[Recovered memory ID {}]", .{node_id});
-                try self.memory_content.put(node_id, placeholder_content);
-                
-                std.debug.print("Reconstructed memory {} from snapshot (content unavailable)\n", .{node_id});
-            }
-        }
     }
 };
 
