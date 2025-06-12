@@ -435,4 +435,30 @@ pub fn build(b: *std.Build) void {
     test_graph_debug_step.dependOn(&test_graph_debug_cmd.step);
 
     // Test exit snapshot functionality
+
+    // Test concept restoration example
+    const concept_restoration_test = b.addExecutable(.{
+        .name = "concept_restoration_test",
+        .root_source_file = b.path("test/test_concept_restoration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    concept_restoration_test.root_module.addImport("memora", memora_module);
+
+    const concept_restoration_cmd = b.addRunArtifact(concept_restoration_test);
+    const concept_restoration_step = b.step("test-concept-restoration", "Test concept and vector restoration after restart");
+    concept_restoration_step.dependOn(&concept_restoration_cmd.step);
+
+    // Test vector embedding fix
+    const vector_fix_test = b.addExecutable(.{
+        .name = "vector_fix_test",
+        .root_source_file = b.path("test/test_vector_embedding_fix.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    vector_fix_test.root_module.addImport("memora", memora_module);
+
+    const vector_fix_cmd = b.addRunArtifact(vector_fix_test);
+    const vector_fix_step = b.step("test-vector-fix", "Test vector embedding fix for MCP server");
+    vector_fix_step.dependOn(&vector_fix_cmd.step);
 } 

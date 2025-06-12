@@ -735,6 +735,7 @@ pub const McpServer = struct {
                 .source = source,
                 .session_id = session_id,
                 .user_id = user_id,
+                .create_embedding = true, // CRITICAL FIX: Enable vector embeddings for semantic search
             }
         ) catch |err| {
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to store memory: {any}", .{err});
