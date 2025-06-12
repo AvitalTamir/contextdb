@@ -51,10 +51,13 @@ pub const MemoryManager = struct {
         };
         
         // Load existing memory content from the log
-        manager.loadExistingMemories() catch {
+        manager.loadExistingMemories() catch |err| {
             // If we can't load existing memories, continue with empty state
-            std.debug.print("Warning: Failed to load existing memories from log\n", .{});
+            std.debug.print("Warning: Failed to load existing memories from snapshots and log: {}\n", .{err});
+            std.debug.print("MemoryManager will start with empty state\n", .{});
         };
+        
+        std.debug.print("MemoryManager initialized with {} memories in cache\n", .{manager.memory_content.count()});
         
         return manager;
     }
@@ -539,6 +542,8 @@ pub const MemoryManager = struct {
     /// Load existing memories from snapshots and log during initialization
     pub fn loadExistingMemories(self: *Self) !void {
         var max_memory_id: u64 = 0;
+        var loaded_files = std.StringHashMap(void).init(self.allocator);
+        defer loaded_files.deinit();
         
         // First, load memory content from ALL snapshots (not just the latest)
         const all_snapshots = try self.memora.snapshot_manager.listSnapshots();
@@ -558,17 +563,122 @@ pub const MemoryManager = struct {
                         memory_contents.deinit();
                     }
                     
+                    // Track which files we've loaded from snapshots
+                    for (snapshot_info.memory_content_files.items) |file_path| {
+                        try loaded_files.put(file_path, {});
+                    }
+                    
                     // Load memory contents from this snapshot
                     for (memory_contents.items) |memory_content| {
                         // Only add if we don't already have this memory ID (avoid duplicates)
                         if (!self.memory_content.contains(memory_content.memory_id)) {
                             const content_copy = try self.allocator.dupe(u8, memory_content.content);
                             try self.memory_content.put(memory_content.memory_id, content_copy);
+                            
+                            // CRITICAL FIX: Also recreate the node in the graph index
+                            // Check if the node already exists in the graph index
+                            if (self.memora.graph_index.getNode(memory_content.memory_id) == null) {
+                                // Create a Memory object with default metadata (we only have content from snapshots)
+                                var memory = Memory.init(memory_content.memory_id, MemoryType.fact, memory_content.content);
+                                
+                                // Convert to node and insert into graph index
+                                const node = memory.toNode();
+                                try self.memora.insertNode(node);
+                                
+                                std.debug.print("  Recreated node {} in graph index\n", .{memory_content.memory_id});
+                            }
                         }
                         max_memory_id = @max(max_memory_id, memory_content.memory_id);
                     }
                     
                     std.debug.print("Loaded {} memories from snapshot {}\n", .{memory_contents.items.len, snapshot_id});
+                }
+            }
+        }
+        
+        // CRITICAL FIX: Also scan for orphaned memory content files that exist but aren't referenced by snapshots
+        const memory_contents_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.memora.snapshot_manager.base_path, "memory_contents" });
+        defer self.allocator.free(memory_contents_path);
+        
+        var dir = std.fs.cwd().openDir(memory_contents_path, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound => {
+                std.debug.print("Memory contents directory not found, skipping orphaned file scan\n", .{});
+                // Continue to the next section
+                // Then load any additional memory content entries from log
+                var iter = self.memora.append_log.iterator();
+                while (iter.next()) |entry| {
+                    if (entry.getEntryType() == .memory_content) {
+                        if (entry.asMemoryContent()) |mem_content| {
+                            // Only add if we don't already have this memory ID from snapshots
+                            if (!self.memory_content.contains(mem_content.memory_id)) {
+                                const content_copy = try self.allocator.dupe(u8, mem_content.content);
+                                try self.memory_content.put(mem_content.memory_id, content_copy);
+                            }
+                            
+                            // Track the maximum memory ID
+                            max_memory_id = @max(max_memory_id, mem_content.memory_id);
+                        }
+                    }
+                }
+                
+                // Set the next memory ID to be one higher than the maximum found
+                if (max_memory_id > 0) {
+                    self.next_memory_id = max_memory_id + 1;
+                }
+                
+                std.debug.print("Loaded {} total memories from snapshots and log, next ID: {}\n", .{ self.memory_content.count(), self.next_memory_id });
+                return;
+            },
+            else => return err,
+        };
+        defer dir.close();
+        
+        var iterator = dir.iterate();
+        while (try iterator.next()) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".json")) {
+                const relative_path = try std.fmt.allocPrint(self.allocator, "memory_contents/{s}", .{entry.name});
+                defer self.allocator.free(relative_path);
+                
+                // Check if this file was already loaded from a snapshot
+                if (!loaded_files.contains(relative_path)) {
+                    std.debug.print("Found orphaned memory content file: {s}\n", .{relative_path});
+                    
+                    // Load this orphaned file directly
+                    const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.memora.snapshot_manager.base_path, relative_path });
+                    defer self.allocator.free(file_path);
+                    
+                    const orphaned_contents = try self.memora.snapshot_manager.readMemoryContentFile(file_path);
+                    defer {
+                        // Free the allocated content strings
+                        for (orphaned_contents.items) |memory_content| {
+                            self.allocator.free(memory_content.content);
+                        }
+                        orphaned_contents.deinit();
+                    }
+                    
+                    // Load memory contents from this orphaned file
+                    for (orphaned_contents.items) |memory_content| {
+                        // Only add if we don't already have this memory ID (avoid duplicates)
+                        if (!self.memory_content.contains(memory_content.memory_id)) {
+                            const content_copy = try self.allocator.dupe(u8, memory_content.content);
+                            try self.memory_content.put(memory_content.memory_id, content_copy);
+                            
+                            // Also recreate the node in the graph index
+                            if (self.memora.graph_index.getNode(memory_content.memory_id) == null) {
+                                // Create a Memory object with default metadata
+                                var memory = Memory.init(memory_content.memory_id, MemoryType.fact, memory_content.content);
+                                
+                                // Convert to node and insert into graph index
+                                const node = memory.toNode();
+                                try self.memora.insertNode(node);
+                                
+                                std.debug.print("  Recreated node {} from orphaned file\n", .{memory_content.memory_id});
+                            }
+                        }
+                        max_memory_id = @max(max_memory_id, memory_content.memory_id);
+                    }
+                    
+                    std.debug.print("Loaded {} memories from orphaned file {s}\n", .{orphaned_contents.items.len, entry.name});
                 }
             }
         }

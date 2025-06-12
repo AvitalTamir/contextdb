@@ -250,7 +250,12 @@ pub const CompressionEngine = struct {
         // Update statistics
         self.stats.binary_blocks_compressed += 1;
         self.stats.total_compression_time_ns += @intCast(compress_time);
-        self.stats.total_bytes_saved += data.len - compressed_data.len;
+        
+        // Handle case where compression makes data larger (avoid integer underflow)
+        if (data.len >= compressed_data.len) {
+            self.stats.total_bytes_saved += data.len - compressed_data.len;
+        }
+        // If compression made data larger, we don't add to bytes_saved (it would be negative)
         
         return CompressedBinaryData{
             .compressed_data = compressed_data,

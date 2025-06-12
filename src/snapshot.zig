@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const config = @import("config.zig");
+const compression = @import("compression.zig");
 
 /// Iceberg-style snapshot manager for Memora
 /// Creates immutable snapshots with metadata and data files
@@ -15,7 +16,7 @@ pub const SnapshotManager = struct {
         const config_to_use = snapshot_config orelse SnapshotConfig{
             .auto_interval = 50, // Enable auto-snapshots by default every 50 log entries
             .max_metadata_size_mb = 10,
-            .compression_enable = false,
+            .compression_enable = true, // Enable compression by default now that it's working
             .cleanup_keep_count = 10,
             .cleanup_auto_enable = true,
             .binary_format_enable = true,
@@ -86,6 +87,7 @@ pub const SnapshotManager = struct {
                 .memory_contents = @intCast(memory_contents.len),
             },
         };
+        errdefer info.deinit(); // Clean up on error
 
         // Write vector files
         if (vectors.len > 0) {
@@ -288,6 +290,95 @@ pub const SnapshotManager = struct {
         return deleted;
     }
 
+    /// Check compression status of existing snapshots and warn about mixed states
+    pub fn checkCompressionStatus(self: *SnapshotManager) !void {
+        const snapshots = try self.listSnapshots();
+        defer snapshots.deinit();
+        
+        if (snapshots.items.len == 0) {
+            std.debug.print("No existing snapshots found.\n", .{});
+            return;
+        }
+        
+        var compressed_count: u32 = 0;
+        var uncompressed_count: u32 = 0;
+        var total_checked: u32 = 0;
+        
+        std.debug.print("Checking compression status of {} snapshots...\n", .{snapshots.items.len});
+        
+        for (snapshots.items) |snapshot_id| {
+            if (self.loadSnapshot(snapshot_id)) |snapshot_info_opt| {
+                if (snapshot_info_opt) |snapshot_info| {
+                    defer snapshot_info.deinit();
+                    
+                    // Check memory content files for compression
+                    for (snapshot_info.memory_content_files.items) |memory_file| {
+                    const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, memory_file });
+                    defer self.allocator.free(file_path);
+                    
+                    if (self.isFileCompressed(file_path)) |is_compressed| {
+                        if (is_compressed) {
+                            compressed_count += 1;
+                        } else {
+                            uncompressed_count += 1;
+                        }
+                        total_checked += 1;
+                    } else |_| {
+                        // File doesn't exist or can't be read
+                        continue;
+                    }
+                }
+                } else {
+                    // Snapshot info is null
+                    continue;
+                }
+            } else |_| {
+                continue;
+            }
+        }
+        
+        if (total_checked == 0) {
+            std.debug.print("No memory content files found to check.\n", .{});
+            return;
+        }
+        
+        std.debug.print("Compression status: {} compressed, {} uncompressed files\n", .{ compressed_count, uncompressed_count });
+        
+        if (self.config.compression_enable) {
+            if (uncompressed_count > 0 and compressed_count > 0) {
+                std.debug.print("⚠️  Mixed compression state detected!\n", .{});
+                std.debug.print("   {} files are compressed, {} are uncompressed\n", .{ compressed_count, uncompressed_count });
+                std.debug.print("   New snapshots will be compressed. Old data remains readable.\n", .{});
+            } else if (uncompressed_count > 0) {
+                std.debug.print("ℹ️  All existing files are uncompressed. New snapshots will be compressed.\n", .{});
+            } else {
+                std.debug.print("✅ All files are compressed as expected.\n", .{});
+            }
+        } else {
+            if (compressed_count > 0) {
+                std.debug.print("⚠️  Warning: {} compressed files found but compression is disabled!\n", .{compressed_count});
+                std.debug.print("   Enable compression in config to read these files properly.\n", .{});
+            } else {
+                std.debug.print("✅ All files are uncompressed as expected.\n", .{});
+            }
+        }
+    }
+    
+    /// Check if a specific file is compressed
+    fn isFileCompressed(self: *SnapshotManager, file_path: []const u8) !bool {
+        const file = std.fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return error.FileNotFound,
+            else => return err,
+        };
+        defer file.close();
+        
+        // Read a small sample to check if it looks like JSON
+        var buffer: [256]u8 = undefined;
+        const bytes_read = try file.readAll(&buffer);
+        
+        return !self.isLikelyJsonContent(buffer[0..bytes_read]);
+    }
+
     // Private methods
 
     fn writeVectorFile(self: *SnapshotManager, relative_path: []const u8, vectors: []const types.Vector) !void {
@@ -348,13 +439,13 @@ pub const SnapshotManager = struct {
         const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.base_path, relative_path });
         defer self.allocator.free(file_path);
 
-        const file = try std.fs.cwd().createFile(file_path, .{});
-        defer file.close();
-
-        // Write as JSON array
-        try file.writeAll("[\n");
+        // Build JSON content in memory first
+        var json_content = std.ArrayList(u8).init(self.allocator);
+        defer json_content.deinit();
+        
+        try json_content.appendSlice("[\n");
         for (memory_contents, 0..) |memory_content, i| {
-            if (i > 0) try file.writeAll(",\n");
+            if (i > 0) try json_content.appendSlice(",\n");
             
             // Escape quotes in content for JSON
             var escaped_content = std.ArrayList(u8).init(self.allocator);
@@ -379,9 +470,38 @@ pub const SnapshotManager = struct {
             const json_line = try std.fmt.allocPrint(self.allocator, "  {{\"memory_id\": {}, \"content\": \"{s}\"}}", .{ memory_content.memory_id, escaped_content.items });
             defer self.allocator.free(json_line);
             
-            try file.writeAll(json_line);
+            try json_content.appendSlice(json_line);
         }
-        try file.writeAll("\n]\n");
+        try json_content.appendSlice("\n]\n");
+
+        const file = try std.fs.cwd().createFile(file_path, .{});
+        defer file.close();
+
+        // Apply compression if enabled
+        if (self.config.compression_enable) {
+            // Initialize compression engine
+            const comp_config = compression.CompressionConfig{
+                .enable_checksums = true,
+                .compression_level = 6,
+                .rle_min_run_length = 3,
+            };
+            var comp_engine = compression.CompressionEngine.init(self.allocator, comp_config);
+            defer comp_engine.deinit();
+            
+            // Compress the JSON content
+            var compressed_data = comp_engine.compressBinary(json_content.items) catch |err| {
+                std.debug.print("Compression failed: {}, writing uncompressed\n", .{err});
+                try file.writeAll(json_content.items);
+                return;
+            };
+            defer compressed_data.deinit(self.allocator);
+            
+            // Write compressed data
+            try file.writeAll(compressed_data.compressed_data);
+            std.debug.print("Compressed memory content: {:.1}% reduction\n", .{(1.0 - compressed_data.compression_ratio) * 100.0});
+        } else {
+            try file.writeAll(json_content.items);
+        }
     }
 
     fn writeSnapshotMetadata(self: *SnapshotManager, info: *const SnapshotInfo) !void {
@@ -513,12 +633,55 @@ pub const SnapshotManager = struct {
         return edges;
     }
 
-    fn readMemoryContentFile(self: *SnapshotManager, file_path: []const u8) !std.ArrayList(types.MemoryContent) {
+    pub fn readMemoryContentFile(self: *SnapshotManager, file_path: []const u8) !std.ArrayList(types.MemoryContent) {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
-        const content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
-        defer self.allocator.free(content);
+        const raw_content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
+        defer self.allocator.free(raw_content);
+
+        // Smart compression detection and handling
+        var content: []const u8 = raw_content;
+        var decompressed_data: ?std.ArrayList(u8) = null;
+        defer if (decompressed_data) |*data| data.deinit();
+        
+        if (self.config.compression_enable) {
+            // Check if the content is compressed by looking for JSON patterns
+            if (!self.isLikelyJsonContent(raw_content)) {
+                // Content appears to be compressed, try to decompress it
+                const comp_config = compression.CompressionConfig{
+                    .enable_checksums = true,
+                    .compression_level = 6,
+                    .rle_min_run_length = 3,
+                };
+                var comp_engine = compression.CompressionEngine.init(self.allocator, comp_config);
+                defer comp_engine.deinit();
+                
+                // Create a temporary CompressedBinaryData structure
+                const compressed_binary = compression.CompressedBinaryData{
+                    .compressed_data = @constCast(raw_content),
+                    .original_size = 0, // Will be read from header
+                    .compression_method = .lz4_fast,
+                    .compression_ratio = 1.0,
+                };
+                
+                if (comp_engine.decompressBinary(&compressed_binary)) |decompressed_bytes| {
+                    decompressed_data = std.ArrayList(u8).init(self.allocator);
+                    try decompressed_data.?.appendSlice(decompressed_bytes);
+                    self.allocator.free(decompressed_bytes);
+                    content = decompressed_data.?.items;
+                    std.debug.print("Successfully decompressed memory content file\n", .{});
+                } else |err| {
+                    std.debug.print("Decompression failed: {}, trying to read as uncompressed\n", .{err});
+                    content = raw_content;
+                }
+            } else {
+                // Content looks like JSON, use as-is
+                content = raw_content;
+            }
+        } else {
+            content = raw_content;
+        }
 
         var memory_contents = std.ArrayList(types.MemoryContent).init(self.allocator);
 
@@ -537,6 +700,32 @@ pub const SnapshotManager = struct {
         }
 
         return memory_contents;
+    }
+
+    /// Check if content looks like JSON (simple heuristic)
+    fn isLikelyJsonContent(self: *SnapshotManager, content: []const u8) bool {
+        _ = self;
+        if (content.len == 0) return false;
+        
+        // Trim whitespace
+        var start: usize = 0;
+        var end: usize = content.len;
+        
+        while (start < end and (content[start] == ' ' or content[start] == '\t' or content[start] == '\n' or content[start] == '\r')) {
+            start += 1;
+        }
+        
+        while (end > start and (content[end-1] == ' ' or content[end-1] == '\t' or content[end-1] == '\n' or content[end-1] == '\r')) {
+            end -= 1;
+        }
+        
+        if (start >= end) return false;
+        
+        // Check if it starts with '[' and ends with ']' (JSON array)
+        // or contains typical JSON patterns
+        const trimmed = content[start..end];
+        return (trimmed[0] == '[' and trimmed[trimmed.len-1] == ']') or
+               std.mem.indexOf(u8, trimmed, "\"memory_id\":") != null;
     }
 
     fn parseSnapshotMetadata(self: *SnapshotManager, json_content: []const u8) !SnapshotInfo {
@@ -731,9 +920,9 @@ pub const SnapshotManager = struct {
                         } else {
                             try unescaped_content.append(content_str[i]);
                             i += 1;
-            }
-        }
-        
+                        }
+                    }
+                    
                     const final_content = try self.allocator.dupe(u8, unescaped_content.items);
                     return types.MemoryContent{ .memory_id = memory_id, .content = final_content };
                 }
@@ -1003,7 +1192,7 @@ test "SnapshotManager with default configuration" {
     // Verify default configuration
     try std.testing.expect(manager.config.auto_interval == 50);
     try std.testing.expect(manager.config.max_metadata_size_mb == 10);
-    try std.testing.expect(manager.config.compression_enable == false);
+    try std.testing.expect(manager.config.compression_enable == true);
     try std.testing.expect(manager.config.cleanup_keep_count == 10);
     try std.testing.expect(manager.config.cleanup_auto_enable == true);
     try std.testing.expect(manager.config.binary_format_enable == true);

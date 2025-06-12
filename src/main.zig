@@ -133,16 +133,54 @@ pub const Memora = struct {
         // Load from storage with persistent index fast path
         try db.loadFromStorageWithPersistentIndexes();
 
+        // Check compression status on startup and warn about mixed states
+        db.snapshot_manager.checkCompressionStatus() catch |err| {
+            std.debug.print("Warning: Failed to check compression status: {}\n", .{err});
+        };
+
         return db;
     }
 
     pub fn deinit(self: *Memora) void {
+        // Create final snapshot before cleanup to ensure no data loss
+        self.createFinalSnapshot() catch |err| {
+            std.debug.print("Warning: Failed to create final snapshot on exit: {}\n", .{err});
+        };
+        
         self.append_log.deinit();
         self.graph_index.deinit();
         self.vector_index.deinit();
         self.snapshot_manager.deinit();
         self.persistent_index_manager.deinit();
         self.metrics.deinit();
+    }
+
+    /// Create a final snapshot before shutdown (if needed)
+    fn createFinalSnapshot(self: *Memora) !void {
+        // Only create snapshot if there are entries in the log
+        const current_entries = self.append_log.getEntryCount();
+        if (current_entries > 0) {
+            std.debug.print("Creating final snapshot with {} log entries before shutdown...\n", .{current_entries});
+            
+            // Ensure the snapshot directory exists before creating snapshot
+            const snapshot_base_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.config.data_path, "snapshots" });
+            defer self.allocator.free(snapshot_base_path);
+            
+            std.fs.cwd().makePath(snapshot_base_path) catch |err| switch (err) {
+                error.PathAlreadyExists => {}, // This is fine
+                else => {
+                    std.debug.print("Warning: Failed to create snapshot directory: {}\n", .{err});
+                    return;
+                },
+            };
+            
+            var snapshot_info = self.createSnapshot() catch |err| {
+                std.debug.print("Warning: Failed to create final snapshot: {}\n", .{err});
+                return;
+            };
+            defer snapshot_info.deinit();
+            std.debug.print("Final snapshot created successfully\n", .{});
+        }
     }
 
     /// Insert a node into the database

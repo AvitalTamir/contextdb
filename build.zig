@@ -206,6 +206,30 @@ pub fn build(b: *std.Build) void {
     const test_partitioning_run = b.addRunArtifact(test_partitioning_exe);
     test_partitioning_step.dependOn(&test_partitioning_run.step);
 
+    // Exit snapshot test
+    const test_exit_snapshot_step = b.step("test-exit-snapshot", "Run exit snapshot test");
+    const test_exit_snapshot_exe = b.addExecutable(.{
+        .name = "test_exit_snapshot",
+        .root_source_file = b.path("test/test_exit_snapshot.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_exit_snapshot_exe.root_module.addImport("memora", memora_module);
+    const test_exit_snapshot_run = b.addRunArtifact(test_exit_snapshot_exe);
+    test_exit_snapshot_step.dependOn(&test_exit_snapshot_run.step);
+
+    // Snapshot compression test
+    const test_compression_step = b.step("test-compression", "Run snapshot compression test");
+    const test_compression_exe = b.addExecutable(.{
+        .name = "test_snapshot_compression",
+        .root_source_file = b.path("test/test_snapshot_compression.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_compression_exe.root_module.addImport("memora", memora_module);
+    const test_compression_run = b.addRunArtifact(test_compression_exe);
+    test_compression_step.dependOn(&test_compression_run.step);
+
     // Fuzzing campaign runner
     const fuzz_runner_step = b.step("fuzz", "Run Memora fuzzing campaigns");
     const fuzz_runner_exe = b.addExecutable(.{
@@ -291,6 +315,8 @@ pub fn build(b: *std.Build) void {
     const test_comprehensive_step = b.step("test-comprehensive", "Run all tests including fuzzing");
     test_comprehensive_step.dependOn(test_all_step);
     test_comprehensive_step.dependOn(&test_distributed_fuzzing_run.step);
+    test_comprehensive_step.dependOn(&test_exit_snapshot_run.step);
+    test_comprehensive_step.dependOn(&test_compression_run.step);
     test_comprehensive_step.dependOn(&fuzz_quick_run.step);
 
     // Add distributed demo
@@ -350,7 +376,7 @@ pub fn build(b: *std.Build) void {
     const enhanced_memory_step = b.step("test-enhanced-memory", "Test enhanced memory storage with vector embeddings and concept graphs");
     const enhanced_memory_exe = b.addExecutable(.{
         .name = "test_enhanced_memory",
-        .root_source_file = b.path("examples/test_enhanced_memory.zig"),
+        .root_source_file = b.path("test/test_enhanced_memory.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -381,4 +407,32 @@ pub fn build(b: *std.Build) void {
     gossip_demo_exe.root_module.addImport("memora", memora_module);
     const gossip_demo_run = b.addRunArtifact(gossip_demo_exe);
     gossip_demo_step.dependOn(&gossip_demo_run.step);
+
+    // Test memory loading from snapshots
+    const test_memory_loading = b.addExecutable(.{
+        .name = "test_memory_loading",
+        .root_source_file = b.path("test/test_memory_loading.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_memory_loading.root_module.addImport("memora", memora_module);
+    
+    const test_memory_loading_cmd = b.addRunArtifact(test_memory_loading);
+    const test_memory_loading_step = b.step("test-memory-loading", "Test memory loading from all snapshots");
+    test_memory_loading_step.dependOn(&test_memory_loading_cmd.step);
+
+    // Test graph index vs memory manager mismatch
+    const test_graph_debug = b.addExecutable(.{
+        .name = "test_graph_index_debug",
+        .root_source_file = b.path("test/test_graph_index_debug.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_graph_debug.root_module.addImport("memora", memora_module);
+    
+    const test_graph_debug_cmd = b.addRunArtifact(test_graph_debug);
+    const test_graph_debug_step = b.step("test-graph-debug", "Debug graph index vs memory manager mismatch");
+    test_graph_debug_step.dependOn(&test_graph_debug_cmd.step);
+
+    // Test exit snapshot functionality
 } 
